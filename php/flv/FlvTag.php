@@ -1,28 +1,26 @@
 <?php
-
+/**
+ * FLV Tag 类
+ */
 class FlvTag {
-    public $tagType = -1;
-    public $dataSize = [];
-    public $Timestamp = [];
-    public $StreamID = [];
-    public $body = [];
-    public $time = -1;
-    public $arr = [];
-    public $size = [];
-
-    public function getTime() {
-        $this->arr = [];
-        foreach ($this->Timestamp as $byte) {
-            $hex = dechex($byte);
-            if (strlen($hex) == 1) {
-                $hex = '0' . $hex;
-            }
-            $this->arr[] = $hex;
-        }
-        array_pop($this->arr);
-        $time = implode('', $this->arr);
-        $this->time = hexdec($time);
-        return $this->time;
+    public $tagType;
+    public $dataSize;
+    public $Timestamp;
+    public $StreamID;
+    public $body;
+    public $size;
+    
+    function __construct() {
+        $this->tagType = 0;
+        $this->dataSize = [];
+        $this->Timestamp = [];
+        $this->StreamID = [];
+        $this->body = [];
+        $this->size = [];
+    }
+    
+    function getTime() {
+        $arr = $this->Timestamp;
+        return ($arr[3] << 24) | ($arr[2] << 16) | ($arr[1] << 8) | $arr[0];
     }
 }
-?>

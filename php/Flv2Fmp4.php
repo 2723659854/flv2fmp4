@@ -1,114 +1,136 @@
 <?php
-
-require_once __DIR__ . '/flv/FlvParse.php';
-require_once __DIR__ . '/flv/TagDemux.php';
-require_once __DIR__ . '/mp4/MP4Remux.php';
-require_once __DIR__ . '/mp4/MP4Moof.php';
-
+/**
+ * FLV 转 fMP4 主类
+ */
 class Flv2Fmp4 {
     private $_config = [];
+    
     public $onInitSegment = null;
     public $onMediaSegment = null;
     public $onMediaInfo = null;
     public $seekCallBack = null;
-    public $loadmetadata = false;
-    public $ftyp_moov = null;
-    public $metaSuccRun = false;
-    public $metas = [];
-    public $parseChunk = null;
-    public $hasAudio = false;
-    public $hasVideo = false;
+    
+    private $loadmetadata = false;
+    private $ftyp_moov = null;
+    private $metaSuccRun = false;
+    private $metas = [];
+    private $parseChunk = null;
+    private $hasAudio = false;
+    private $hasVideo = false;
+    
     private $_pendingResolveSeekPoint = -1;
     private $_tempBaseTime = 0;
-    private $_setflvBase = null;
-    private $_tagDemux = null;
-    private $_m4mof = null;
-
-    public function __construct($config = []) {
+    
+    private $setflvBase = null;
+    
+    private $flvParse = null;
+    private $tagDemux = null;
+    private $m4mof = null;
+    
+    function __construct($config = []) {
         $this->_config = ['_isLive' => false];
-        $this->_config = array_merge($this->_config, $config);
-
-        $this->_setflvBase = [$this, 'setflvBasefrist'];
-
-        $this->_tagDemux = new TagDemux();
-        $this->_tagDemux->setOnTrackMetadata([$this, 'Metadata']);
-        $this->_tagDemux->onMediaInfo([$this, 'metaSucc']);
-        $this->_tagDemux->setOnDataAvailable([$this, 'onDataAvailable']);
-
-        $this->_m4mof = new MP4Remuxer($this->_config);
-        $this->_m4mof->setOnMediaSegment([$this, 'onMdiaSegment']);
+        foreach ($config as $key => $value) {
+            $this->_config[$key] = $value;
+        }
+        
+        $this->flvParse = new FlvParse();
+        $this->tagDemux = new TagDemux();
+        $this->m4mof = new MP4Moof($this->_config);
+        
+        $this->setflvBase = [$this, 'setflvBasefrist'];
+        
+        $self = $this;
+        $this->tagDemux->setOnTrackMetadata(function($type, $meta) use ($self) {
+            $self->Metadata($type, $meta);
+        });
+        
+        $this->tagDemux->setOnDataAvailable(function($audioTrack, $videoTrack) use ($self) {
+            $self->onDataAvailable($audioTrack, $videoTrack);
+        });
+        
+        $this->m4mof->setOnMediaSegment(function($track, $value) use ($self) {
+            $self->onMdiaSegment($track, $value);
+        });
     }
-
-    public function seek($baseTime) {
-        $this->_setflvBase = [$this, 'setflvBasefrist'];
-        if ($baseTime === null || $baseTime === 0) {
+    
+    function seek($baseTime) {
+        $this->setflvBase = [$this, 'setflvBasefrist'];
+        
+        if ($baseTime == null || $baseTime == 0) {
             $baseTime = 0;
             $this->_pendingResolveSeekPoint = -1;
         }
+        
         if ($this->_tempBaseTime != $baseTime) {
             $this->_tempBaseTime = $baseTime;
-            $this->_tagDemux->_timestampBase = $baseTime;
-            $this->_m4mof->seek($baseTime);
-            $this->_m4mof->insertDiscontinuity();
+            $this->tagDemux->setTimestampBase($baseTime);
+            $this->m4mof->seek($baseTime);
+            $this->m4mof->insertDiscontinuity();
             $this->_pendingResolveSeekPoint = $baseTime;
         }
     }
-
-    public function setflvBasefrist($arraybuff, $baseTime) {
-        $flvParse = new FlvParse();
-        $offset = $flvParse->setFlv($arraybuff);
+    
+    function setflvBasefrist($arraybuff, $baseTime) {
+        echo "[Flv2Fmp4] 首次接收FLV数据\n";
         
-        if (count($flvParse->arrTag) > 0 && $flvParse->arrTag[0]->tagType != 18) {
-            if (isset($this->error)) {
-                $this->error(new Exception('without metadata tag'));
-            }
+        $offset = $this->flvParse->setFlv($arraybuff);
+        
+        if ($this->flvParse->getTags() && $this->flvParse->getTags()[0]->tagType != 18) {
+            echo "[Flv2Fmp4] 警告: 缺少metadata标签\n";
         }
         
-        if (count($flvParse->arrTag) > 0) {
-            $this->_tagDemux->setHasAudio($flvParse->_hasAudio);
-            $this->_tagDemux->setHasVideo($flvParse->_hasVideo);
-            $this->hasAudio = $flvParse->_hasAudio;
-            $this->hasVideo = $flvParse->_hasVideo;
-
-            if ($this->_tempBaseTime != 0 && $this->_tempBaseTime == $flvParse->arrTag[0]->getTime()) {
-                $this->_tagDemux->_timestampBase = 0;
+        if (count($this->flvParse->getTags()) > 0) {
+            $this->tagDemux->setHasAudio($this->hasAudio = $this->flvParse->getHasAudio());
+            $this->tagDemux->setHasVideo($this->hasVideo = $this->flvParse->getHasVideo());
+            
+            echo "[Flv2Fmp4] FLV信息: 音频=" . ($this->hasAudio ? '是' : '否') . ", 视频=" . ($this->hasVideo ? '是' : '否') . "\n";
+            
+            if ($this->_tempBaseTime != 0 && $this->_tempBaseTime == $this->flvParse->getTags()[0]->getTime()) {
+                $this->tagDemux->setTimestampBase(0);
             }
-            $this->_tagDemux->moofTag($flvParse->arrTag);
-            $this->_setflvBase = [$this, 'setflvBaseUsually'];
+            
+            $this->tagDemux->moofTag($this->flvParse->getTags());
+            $this->setflvBase = [$this, 'setflvBaseUsually'];
         }
-
+        
         return $offset;
     }
-
-    public function setflvBaseUsually($arraybuff, $baseTime) {
-        $flvParse = new FlvParse();
-        $offset = $flvParse->setFlv($arraybuff);
-
-        if (count($flvParse->arrTag) > 0) {
-            $this->_tagDemux->moofTag($flvParse->arrTag);
+    
+    function setflvBaseUsually($arraybuff, $baseTime) {
+        $offset = $this->flvParse->setFlv($arraybuff);
+        
+        if (count($this->flvParse->getTags()) > 0) {
+            $this->tagDemux->moofTag($this->flvParse->getTags());
         }
-
+        
         return $offset;
     }
-
-    public function onMdiaSegment($track, $value) {
+    
+    function onMdiaSegment($track, $value) {
+        echo "[Flv2Fmp4] 媒体段回调: $track, 数据大小=" . count($value['data']) . "\n";
+        
         if ($this->onMediaSegment) {
-            ($this->onMediaSegment)($track, $value);
+            call_user_func($this->onMediaSegment, $value['data']);
         }
+        
         if ($this->_pendingResolveSeekPoint != -1 && $track == 'video') {
             $seekpoint = $this->_pendingResolveSeekPoint;
             $this->_pendingResolveSeekPoint = -1;
+            
             if ($this->seekCallBack) {
-                ($this->seekCallBack)($seekpoint);
+                $this->seekCallBack($seekpoint);
             }
         }
     }
-
-    public function Metadata($type, $meta) {
+    
+    function Metadata($type, $meta) {
+        echo "[Flv2Fmp4] 元数据回调: $type\n";
+        
         switch ($type) {
             case 'video':
                 $this->metas[] = $meta;
-                $this->_m4mof->setVideoMeta($meta);
+                $this->m4mof->setVideoMeta($meta);
+                
                 if ($this->hasVideo && !$this->hasAudio) {
                     $this->metaSucc();
                     return;
@@ -116,22 +138,23 @@ class Flv2Fmp4 {
                 break;
             case 'audio':
                 $this->metas[] = $meta;
-                $this->_m4mof->setAudioMeta($meta);
+                $this->m4mof->setAudioMeta($meta);
+                
                 if (!$this->hasVideo && $this->hasAudio) {
                     $this->metaSucc();
                     return;
                 }
                 break;
         }
+        
         if ($this->hasVideo && $this->hasAudio && count($this->metas) > 1) {
             $this->metaSucc();
         }
     }
-
-    public function metaSucc($mi = null) {
+    
+    function metaSucc($mi = null) {
         if ($this->onMediaInfo) {
-            $mediaInfo = $mi ?: $this->_tagDemux->getMediaInfo();
-            ($this->onMediaInfo)($mediaInfo, ['hasAudio' => $this->hasAudio, 'hasVideo' => $this->hasVideo]);
+            call_user_func($this->onMediaInfo, $mi ?: $this->tagDemux->getMediaInfo(), ['hasAudio' => $this->hasAudio, 'hasVideo' => $this->hasVideo]);
         }
         
         if (count($this->metas) == 0) {
@@ -139,77 +162,25 @@ class Flv2Fmp4 {
             return;
         }
         
-        if ($mi) {
-            return;
-        }
+        if ($mi) return;
         
+        echo "[Flv2Fmp4] 生成初始化段, 元数据数=" . count($this->metas) . "\n";
         $this->ftyp_moov = MP4::generateInitSegment($this->metas);
-        if ($this->onInitSegment && $this->loadmetadata == false) {
-            ($this->onInitSegment)($this->ftyp_moov);
+        
+        echo "[Flv2Fmp4] 初始化段大小=" . count($this->ftyp_moov) . " bytes\n";
+        
+        if ($this->onInitSegment && !$this->loadmetadata) {
+            call_user_func($this->onInitSegment, $this->ftyp_moov);
             $this->loadmetadata = true;
         }
     }
-
-    public function onDataAvailable($audiotrack, $videotrack) {
-        $this->_m4mof->remux($audiotrack, $videotrack);
+    
+    function onDataAvailable($audiotrack, $videotrack) {
+        $this->m4mof->remux($audiotrack, $videotrack);
     }
-
-    public function setflv($arraybuff, $baseTime = 0) {
-        return call_user_func($this->_setflvBase, $arraybuff, $baseTime);
-    }
-
-    public function setflvloc($arraybuff) {
-        $flvParse = new FlvParse();
-        $offset = $flvParse->setFlv($arraybuff);
-
-        if (count($flvParse->arrTag) > 0) {
-            return $flvParse->arrTag;
-        }
-        return null;
+    
+    function setflv($arraybuff, $baseTime = 0) {
+        echo "[Flv2Fmp4] 输入FLV数据, 大小=" . count($arraybuff) . " bytes\n";
+        return call_user_func($this->setflvBase, $arraybuff, $baseTime);
     }
 }
-
-class Flv2Fmp4Foreign {
-    private $_f2m = null;
-    private $_onInitSegment = null;
-    private $_onMediaSegment = null;
-    private $_onMediaInfo = null;
-    private $_seekCallBack = null;
-
-    public function __construct($config = []) {
-        $this->_f2m = new Flv2Fmp4($config);
-    }
-
-    public function seek($basetime) {
-        $this->_f2m->seek($basetime);
-    }
-
-    public function setflv($arraybuff) {
-        return $this->_f2m->setflv($arraybuff, 0);
-    }
-
-    public function setflvloc($arraybuff) {
-        return $this->_f2m->setflvloc($arraybuff);
-    }
-
-    public function setOnInitSegment($fun) {
-        $this->_onInitSegment = $fun;
-        $this->_f2m->onInitSegment = $fun;
-    }
-
-    public function setOnMediaSegment($fun) {
-        $this->_onMediaSegment = $fun;
-        $this->_f2m->onMediaSegment = $fun;
-    }
-
-    public function setOnMediaInfo($fun) {
-        $this->_onMediaInfo = $fun;
-        $this->_f2m->onMediaInfo = $fun;
-    }
-
-    public function setSeekCallBack($fun) {
-        $this->_seekCallBack = $fun;
-        $this->_f2m->seekCallBack = $fun;
-    }
-}
-?>
