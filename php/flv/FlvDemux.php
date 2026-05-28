@@ -3,7 +3,7 @@
 require_once __DIR__ . '/../utils/decodeUTF8.php';
 
 class FlvDemux {
-    private static $le;
+    private static $le = true;
 
     public function __construct() {
         self::$le = true;
@@ -19,7 +19,7 @@ class FlvDemux {
                 'name' => $name['data'],
                 'value' => $value['data']
             ],
-            'size' => $value['size'],
+            'size' => $name['size'] + $value['size'],
             'objectEnd' => $isObjectEnd
         ];
     }
@@ -28,7 +28,7 @@ class FlvDemux {
         return self::parseObject($arrayBuffer, $dataOffset, $dataSize);
     }
 
-    public static function parseLongString($arrayBuffer, $dataOffset, $dataSize) {
+    public static function parseLongString($arrayBuffer, $dataOffset, $dataSize=0) {
         $length = self::readUint32($arrayBuffer, $dataOffset, !self::$le);
 
         $str = '';
@@ -43,7 +43,7 @@ class FlvDemux {
         ];
     }
 
-    public static function parseDate($arrayBuffer, $dataOffset, $dataSize) {
+    public static function parseDate($arrayBuffer, $dataOffset, $dataSize=0) {
         $timestamp = self::readFloat64($arrayBuffer, $dataOffset, !self::$le);
         $localTimeOffset = self::readInt16($arrayBuffer, $dataOffset + 8, !self::$le);
         $timestamp += $localTimeOffset * 60 * 1000;
@@ -54,7 +54,7 @@ class FlvDemux {
         ];
     }
 
-    public static function parseString($arrayBuffer, $dataOffset, $dataSize) {
+    public static function parseString($arrayBuffer, $dataOffset, $dataSize=0) {
         $length = self::readUint16($arrayBuffer, $dataOffset, !self::$le);
         $str = '';
         if ($length > 0) {
@@ -69,9 +69,12 @@ class FlvDemux {
 
     public static function parseMetadata($arr) {
         $name = self::parseScript($arr, 0);
+        if (!isset($name['data']) || !isset($name['size'])) {
+            return [];
+        }
         $value = self::parseScript($arr, $name['size'], count($arr) - $name['size']);
         $data = [];
-        $data[$name['data']] = $value['data'];
+        $data[$name['data']] = isset($value['data']) ? $value['data'] : null;
         return $data;
     }
 
@@ -88,6 +91,11 @@ class FlvDemux {
 
         $value = null;
         $objectEnd = false;
+        
+        if ($dataOffset >= count($dv)) {
+            return ['value' => null, 'size' => 0];
+        }
+        
         $type = $dv[$dataOffset];
         $dataOffset += 1;
 
@@ -109,16 +117,16 @@ class FlvDemux {
             case 3:
                 $value = [];
                 $terminal = 0;
-                if ((self::readUint32($buffer, $dataSize - 4, !self::$le) & 0x00FFFFFF) === 9) {
+                if ((self::readUint32($buffer, $offset + $dataSize - 4, !self::$le) & 0x00FFFFFF) === 9) {
                     $terminal = 3;
                 }
-                while ($dataOffset < $dataSize - 4) {
-                    $amfobj = self::parseObject($buffer, $dataOffset, $dataSize - $offset - $terminal);
+                while ($dataOffset < $offset + $dataSize - 4) {
+                    $amfobj = self::parseObject($buffer, $dataOffset, $dataSize - ($dataOffset - $offset) - $terminal);
                     if ($amfobj['objectEnd']) break;
                     $value[$amfobj['data']['name']] = $amfobj['data']['value'];
-                    $dataOffset = $amfobj['size'];
+                    $dataOffset += $amfobj['size'];
                 }
-                if ($dataOffset <= $dataSize - 3) {
+                if ($dataOffset <= $offset + $dataSize - 3) {
                     $marker = self::readUint32($buffer, $dataOffset - 1, !self::$le) & 0x00FFFFFF;
                     if ($marker === 9) {
                         $dataOffset += 3;
@@ -127,57 +135,55 @@ class FlvDemux {
                 break;
             case 8:
                 $value = [];
+                $strictArrayLength = self::readUint32($buffer, $dataOffset, !self::$le);
                 $dataOffset += 4;
-                $terminal = 0;
-                if ((self::readUint32($buffer, $dataSize - 4, !self::$le) & 0x00FFFFFF) === 9) {
-                    $terminal = 3;
+                for ($i = 0; $i < $strictArrayLength; $i++) {
+                    $val = self::parseScript($buffer, $dataOffset);
+                    $value[] = isset($val['data']) ? $val['data'] : null;
+                    $dataOffset += isset($val['size']) ? $val['size'] : 0;
                 }
-                while ($dataOffset < $dataSize - 8) {
-                    $amfvar = self::parseVariable($buffer, $dataOffset);
+                break;
+            case 9:
+                $value = null;
+                $objectEnd = true;
+                break;
+            case 10:
+                $value = [];
+                $ecmaArrayLength = self::readUint32($buffer, $dataOffset, !self::$le);
+                $dataOffset += 4;
+                $remainingSize = $dataSize - ($dataOffset - $offset);
+                while ($dataOffset < $offset + $dataSize - 4) {
+                    $amfvar = self::parseVariable($buffer, $dataOffset, $remainingSize);
                     if ($amfvar['objectEnd']) break;
                     $value[$amfvar['data']['name']] = $amfvar['data']['value'];
-                    $dataOffset = $amfvar['size'];
+                    $dataOffset += $amfvar['size'];
+                    $remainingSize = $dataSize - ($dataOffset - $offset);
                 }
-                if ($dataOffset <= $dataSize - 3) {
+                if ($dataOffset <= $offset + $dataSize - 3) {
                     $marker = self::readUint32($buffer, $dataOffset - 1, !self::$le) & 0x00FFFFFF;
                     if ($marker === 9) {
                         $dataOffset += 3;
                     }
                 }
                 break;
-            case 9:
-                $value = null;
-                $dataOffset = 1;
-                $objectEnd = true;
-                break;
-            case 10:
-                $value = [];
-                $strictArrayLength = self::readUint32($buffer, $dataOffset, !self::$le);
-                $dataOffset += 4;
-                for ($i = 0; $i < $strictArrayLength; $i++) {
-                    $val = self::parseScript($buffer, $dataOffset);
-                    $value[] = $val['data'];
-                    $dataOffset = $val['size'];
-                }
-                break;
             case 11:
-                $date = self::parseDate($buffer, $dataOffset + 1, $dataSize - 1);
+                $date = self::parseDate($buffer, $dataOffset, $dataSize - 1);
                 $value = $date['data'];
-                $dataOffset += $date['size'];
+                $dataOffset += $date['size'] + 1;
                 break;
             case 12:
-                $amfLongStr = self::parseString($buffer, $dataOffset + 1, $dataSize - 1);
+                $amfLongStr = self::parseLongString($buffer, $dataOffset, $dataSize);
                 $value = $amfLongStr['data'];
                 $dataOffset += $amfLongStr['size'];
                 break;
             default:
-                $dataOffset = $dataSize;
+                $dataOffset = $offset + $dataSize;
                 break;
         }
         
         return [
             'data' => $value,
-            'size' => $dataOffset,
+            'size' => $dataOffset - $offset,
             'objectEnd' => $objectEnd
         ];
     }
@@ -213,6 +219,9 @@ class FlvDemux {
     }
 
     private static function readFloat64($buffer, $offset, $littleEndian) {
+        if ($offset + 8 > count($buffer)) {
+            return 0.0;
+        }
         $bytes = array_slice($buffer, $offset, 8);
         if (!$littleEndian) {
             $bytes = array_reverse($bytes);
@@ -221,7 +230,8 @@ class FlvDemux {
         foreach ($bytes as $byte) {
             $packed .= chr($byte);
         }
-        return unpack('d', $packed)[1];
+        $result = unpack('d', $packed);
+        return $result ? $result[1] : 0.0;
     }
 }
 ?>

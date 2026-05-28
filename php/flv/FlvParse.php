@@ -12,6 +12,7 @@ class FlvParse {
     private $frist = true;
     public $_hasAudio = false;
     public $_hasVideo = false;
+    private $_onTag = null;
 
     public function setFlv($uint8) {
         $this->stop = false;
@@ -34,6 +35,10 @@ class FlvParse {
         } else {
             return $this->offset;
         }
+    }
+
+    public function setOnTag($callback) {
+        $this->_onTag = $callback;
     }
 
     public function probe($buffer) {
@@ -62,40 +67,50 @@ class FlvParse {
     }
 
     public function parse() {
-        while ($this->index < count($this->tempUint8) && !$this->stop) {
+        $totalLength = count($this->tempUint8);
+        
+        while ($this->index < $totalLength && !$this->stop) {
             $this->offset = $this->index;
 
+            if ($totalLength - $this->index < 11) {
+                $this->stop = true;
+                continue;
+            }
+
             $t = new FlvTag();
-            if (count($this->tempUint8) - $this->index >= 11) {
-                $read = $this->read(1);
-                $t->tagType = $read[0];
-                $t->dataSize = $this->read(3);
-                $t->Timestamp = $this->read(4);
-                $t->StreamID = $this->read(3);
-            } else {
+            $read = $this->read(1);
+            $t->tagType = $read[0];
+            $t->dataSize = $this->read(3);
+            $t->Timestamp = $this->read(4);
+            $t->StreamID = $this->read(3);
+            
+            $bodySum = $this->getBodySum($t->dataSize);
+            
+            if ($totalLength - $this->index < ($bodySum + 4)) {
                 $this->stop = true;
                 continue;
             }
             
-            $bodySum = $this->getBodySum($t->dataSize);
-            if (count($this->tempUint8) - $this->index >= ($bodySum + 4)) {
-                $t->body = $this->read($bodySum);
-                if ($t->tagType == 9 && $this->_hasVideo) {
-                    $this->arrTag[] = $t;
-                }
-                if ($t->tagType == 8 && $this->_hasAudio) {
-                    $this->arrTag[] = $t;
-                }
-                if ($t->tagType == 18) {
-                    if (count($this->arrTag) == 0) {
-                        $this->arrTag[] = $t;
-                    }
-                }
-                $t->size = $this->read(4);
-            } else {
-                $this->stop = true;
-                continue;
+            $t->body = $this->read($bodySum);
+            
+            $shouldAdd = false;
+            if ($t->tagType == 9 && $this->_hasVideo) {
+                $shouldAdd = true;
+            } else if ($t->tagType == 8 && $this->_hasAudio) {
+                $shouldAdd = true;
+            } else if ($t->tagType == 18 && count($this->arrTag) == 0) {
+                $shouldAdd = true;
             }
+            
+            if ($shouldAdd) {
+                if ($this->_onTag) {
+                    call_user_func($this->_onTag, $t);
+                } else {
+                    $this->arrTag[] = $t;
+                }
+            }
+            
+            $this->read(4);
             $this->offset = $this->index;
         }
 
@@ -109,11 +124,7 @@ class FlvParse {
     }
 
     private function getBodySum($arr) {
-        $_str = '';
-        $_str .= (strlen(dechex($arr[0])) == 1 ? '0' . dechex($arr[0]) : dechex($arr[0]));
-        $_str .= (strlen(dechex($arr[1])) == 1 ? '0' . dechex($arr[1]) : dechex($arr[1]));
-        $_str .= (strlen(dechex($arr[2])) == 1 ? '0' . dechex($arr[2]) : dechex($arr[2]));
-        return hexdec($_str);
+        return ($arr[0] << 16) | ($arr[1] << 8) | $arr[2];
     }
 }
 ?>
