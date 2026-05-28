@@ -33,11 +33,11 @@ $flv2fmp4->onInitSegment = function ($data) use (&$initData) {
 };
 
 // 设置媒体段回调（生成 m4s 媒体片段）
-$flv2fmp4->onMediaSegment = function ($data) use (&$segmentCount, &$allSegments) {
+$flv2fmp4->onMediaSegment = function ($type, $data) use (&$segmentCount, &$allSegments) {
     $segmentCount++;
-    echo "onMediaSegment called! segment #$segmentCount, data length: " . count($data) . " bytes\r\n";
-    $allSegments[] = $data;
-    file_put_contents(__DIR__.'/output/segment_' . $segmentCount . '.m4s', pack('C*', ...$data));
+    echo "onMediaSegment called! segment #$segmentCount ($type), data length: " . count($data['data']) . " bytes\r\n";
+    $allSegments[] = $data['data'];
+    file_put_contents(__DIR__.'/output/segment_' . $segmentCount . '.m4s', pack('C*', ...$data['data']));
 };
 
 // 设置媒体信息回调

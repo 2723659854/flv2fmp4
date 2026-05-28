@@ -82,8 +82,7 @@ class MP4Remuxer {
         if (!$this->_dtsBaseInited) {
             $this->_calculateDtsBase($audioTrack, $videoTrack);
         }
-        $this->_remuxVideo($videoTrack);
-        $this->_remuxAudio($audioTrack);
+        $this->_remuxMixed($audioTrack, $videoTrack);
     }
 
     public function _onTrackMetadataReceived($type, $metadata) {
@@ -478,6 +477,135 @@ class MP4Remuxer {
             'sampleCount' => count($mp4Samples),
             'info' => $info
         ]);
+    }
+
+    private function _remuxMixed($audioTrack, $videoTrack) {
+        if ($this->_audioMeta === null || $this->_videoMeta === null) {
+            return;
+        }
+
+        $audioSamples = $audioTrack['samples'];
+        $videoSamples = $videoTrack['samples'];
+
+        if (!$audioSamples || count($audioSamples) === 0 || !$videoSamples || count($videoSamples) === 0) {
+            return;
+        }
+
+        $audioOffset = 0;
+        $videoOffset = 0;
+        $mixedSamples = [];
+        $dataOffset = 8;
+
+        while ($audioOffset < count($audioSamples) || $videoOffset < count($videoSamples)) {
+            $audioSample = $audioOffset < count($audioSamples) ? $audioSamples[$audioOffset] : null;
+            $videoSample = $videoOffset < count($videoSamples) ? $videoSamples[$videoOffset] : null;
+
+            if ($audioSample !== null && ($videoSample === null || $audioSample['dts'] <= $videoSample['dts'])) {
+                $unit = $audioSample['unit'];
+                $mixedSamples[] = ['type' => 'audio', 'sample' => $audioSample, 'offset' => $dataOffset, 'unit' => $unit];
+                $dataOffset += count($unit);
+                $audioOffset++;
+            } else if ($videoSample !== null) {
+                $unit = [];
+                foreach ($videoSample['units'] as $u) {
+                    $unit = array_merge($unit, $u['data']);
+                }
+                $mixedSamples[] = ['type' => 'video', 'sample' => $videoSample, 'offset' => $dataOffset, 'unit' => $unit];
+                $dataOffset += count($unit);
+                $videoOffset++;
+            }
+        }
+
+        $bytes = $dataOffset;
+        $mdatbox = array_fill(0, $bytes, 0);
+        $mdatbox[0] = ($bytes >> 24) & 0xFF;
+        $mdatbox[1] = ($bytes >> 16) & 0xFF;
+        $mdatbox[2] = ($bytes >> 8) & 0xFF;
+        $mdatbox[3] = $bytes & 0xFF;
+        $mdatbox[4] = 0x6D;
+        $mdatbox[5] = 0x64;
+        $mdatbox[6] = 0x61;
+        $mdatbox[7] = 0x74;
+
+        foreach ($mixedSamples as $item) {
+            $unit = $item['unit'];
+            $offset = $item['offset'];
+            foreach ($unit as $byte) {
+                $mdatbox[$offset++] = $byte;
+            }
+        }
+
+        $audioMp4Samples = [];
+        $videoMp4Samples = [];
+        $firstDts = null;
+
+        foreach ($mixedSamples as $item) {
+            $sample = $item['sample'];
+            $unit = $item['unit'];
+            $originalDts = $sample['dts'] - $this->_dtsBase;
+            
+            if ($firstDts === null) {
+                $firstDts = $originalDts;
+            }
+
+            $mp4Sample = [
+                'dts' => $originalDts,
+                'pts' => $sample['pts'],
+                'cts' => isset($sample['cts']) ? $sample['cts'] : 0,
+                'size' => count($unit),
+                'duration' => isset($sample['duration']) ? $sample['duration'] : 0,
+                'originalDts' => $sample['dts'],
+                'flags' => isset($sample['flags']) ? $sample['flags'] : [
+                    'isLeading' => 0,
+                    'dependsOn' => 1,
+                    'isDependedOn' => 0,
+                    'hasRedundancy' => 0,
+                    'isNonSync' => 0
+                ]
+            ];
+
+            if ($item['type'] === 'audio') {
+                $audioMp4Samples[] = $mp4Sample;
+            } else {
+                $videoMp4Samples[] = $mp4Sample;
+            }
+        }
+
+        $videoTrackData = [
+            'id' => $videoTrack['id'],
+            'samples' => $videoMp4Samples,
+            'sequenceNumber' => $videoTrack['sequenceNumber']
+        ];
+
+        $audioTrackData = [
+            'id' => $audioTrack['id'],
+            'samples' => $audioMp4Samples,
+            'sequenceNumber' => $audioTrack['sequenceNumber']
+        ];
+
+        $moofbox = $this->_generateMixedMoof($videoTrackData, $audioTrackData, $firstDts);
+
+        $videoTrack['samples'] = [];
+        $videoTrack['length'] = 0;
+        $audioTrack['samples'] = [];
+        $audioTrack['length'] = 0;
+
+        ($this->_onMediaSegment)('mixed', [
+            'type' => 'mixed',
+            'data' => array_merge($moofbox, $mdatbox),
+            'sampleCount' => count($mixedSamples),
+            'info' => null
+        ]);
+    }
+
+    private function _generateMixedMoof($videoTrack, $audioTrack, $baseMediaDecodeTime) {
+        $videoTraf = MP4::traf($videoTrack, $baseMediaDecodeTime);
+        $audioTraf = MP4::traf($audioTrack, $baseMediaDecodeTime);
+
+        $sequenceNumber = min($videoTrack['sequenceNumber'], $audioTrack['sequenceNumber']);
+        $mfhd = MP4::mfhd($sequenceNumber);
+
+        return MP4::box(MP4::$types['moof'], $mfhd, $videoTraf, $audioTraf);
     }
 }
 ?>

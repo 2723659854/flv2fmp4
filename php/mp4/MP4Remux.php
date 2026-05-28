@@ -1,7 +1,7 @@
 <?php
 
 class MP4 {
-    private static $types = [];
+    public static $types = [];
     private static $constants = [];
 
     public static function init() {
@@ -450,7 +450,8 @@ class MP4 {
         $trackId = $track['id'];
 
         $tfhd = self::box(self::$types['tfhd'], [
-            0x00, 0x00, 0x00, 0x00,
+            0x00,  // version (1 byte)
+            0x00, 0x00, 0x00,  // flags (3 bytes)
             ($trackId >> 24) & 0xFF,
             ($trackId >> 16) & 0xFF,
             ($trackId >> 8) & 0xFF,
@@ -466,7 +467,7 @@ class MP4 {
         ]);
         
         $sdtp = self::sdtp($track);
-        $trun = self::trun($track, count($sdtp) + 16 + 16 + 8 + 16 + 8 + 8);
+        $trun = self::trun($track, count($sdtp) + 20 + 16 + 8 + 16 + 8 + 8);
 
         return self::box(self::$types['traf'], $tfhd, $tfdt, $trun, $sdtp);
     }

@@ -93,7 +93,7 @@ class Flv2Fmp4 {
 
     public function onMdiaSegment($track, $value) {
         if ($this->onMediaSegment) {
-            ($this->onMediaSegment)($value['data']);
+            ($this->onMediaSegment)($track, $value);
         }
         if ($this->_pendingResolveSeekPoint != -1 && $track == 'video') {
             $seekpoint = $this->_pendingResolveSeekPoint;
