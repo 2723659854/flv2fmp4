@@ -259,7 +259,8 @@ class MP4Remuxer {
                     'isLeading' => 0,
                     'dependsOn' => 1,
                     'isDependedOn' => 0,
-                    'hasRedundancy' => 0
+                    'hasRedundancy' => 0,
+                    'isNonSync' => 0
                 ]
             ];
             $mp4Samples[] = $mp4Sample;
@@ -319,7 +320,8 @@ class MP4Remuxer {
                 'isLeading' => 0,
                 'dependsOn' => 1,
                 'isDependedOn' => 0,
-                'hasRedundancy' => 0
+                'hasRedundancy' => 0,
+                'isNonSync' => 0
             ]
         ];
 

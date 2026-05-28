@@ -22,7 +22,7 @@ class TagDemux {
     private $_audioMetadata = null;
     private $_videoMetadata = null;
     private $_naluLengthSize = 4;
-    private $_timestampBase = 0;
+    public $_timestampBase = 0;
     private $_timescale = 1000;
     private $_duration = 0;
     private $_durationOverrided = false;

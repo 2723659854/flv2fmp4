@@ -5,6 +5,11 @@ class MP4 {
     private static $constants = [];
 
     public static function init() {
+        if (!empty(self::$types['avc1'])) {
+            // Already initialized
+            return;
+        }
+        
         self::$types = [
             'avc1' => [], 'avcC' => [], 'btrt' => [], 'dinf' => [], 'dref' => [],
             'esds' => [], 'ftyp' => [], 'hdlr' => [], 'mdat' => [], 'mdhd' => [],
@@ -134,18 +139,42 @@ class MP4 {
     }
 
     public static function moov($meta) {
-        $mvhd = self::mvhd($meta[0]['timescale'], $meta[0]['duration']);
-        $vtrak = self::trak($meta[0]);
+        // Find video and audio metadata
+        $videoMeta = null;
+        $audioMeta = null;
+        
+        foreach ($meta as $m) {
+            if (isset($m['codecWidth'])) {
+                $videoMeta = $m;
+            } else if (isset($m['sampleRate'])) {
+                $audioMeta = $m;
+            }
+        }
+        
+        // Use video meta for mvhd if available, otherwise use audio
+        $primaryMeta = $videoMeta ?: $audioMeta;
+        $mvhd = self::mvhd($primaryMeta['timescale'], $primaryMeta['duration']);
+        
+        // Create tracks
+        $vtrak = null;
         $atrak = null;
-        if (count($meta) > 1) {
-            $atrak = self::trak($meta[1]);
+        
+        if ($videoMeta) {
+            $vtrak = self::trak($videoMeta);
+        }
+        if ($audioMeta) {
+            $atrak = self::trak($audioMeta);
         }
 
         $mvex = self::mvex($meta);
-        if (count($meta) > 1) {
+        if ($vtrak && $atrak) {
             return self::box(self::$types['moov'], $mvhd, $vtrak, $atrak, $mvex);
-        } else {
+        } else if ($vtrak) {
             return self::box(self::$types['moov'], $mvhd, $vtrak, $mvex);
+        } else if ($atrak) {
+            return self::box(self::$types['moov'], $mvhd, $atrak, $mvex);
+        } else {
+            return self::box(self::$types['moov'], $mvhd, $mvex);
         }
     }
 
@@ -350,6 +379,8 @@ class MP4 {
         $data = [
             0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x01,
+            0x00, 0x00,  // pre_defined (2 bytes)
+            0x00, 0x00,  // reserved (2 bytes)
             0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00,
@@ -372,6 +403,7 @@ class MP4 {
             0x00, 0x18,
             0xFF, 0xFF
         ];
+
         return self::box(self::$types['avc1'], $data, self::box(self::$types['avcC'], $avcc));
     }
 
