@@ -1,0 +1,119 @@
+<?php
+
+require_once 'FlvTag.php';
+
+class FlvParse {
+    private $tempUint8 = [];
+    public $arrTag = [];
+    private $index = 0;
+    private $tempArr = [];
+    private $stop = false;
+    public $offset = 0;
+    private $frist = true;
+    public $_hasAudio = false;
+    public $_hasVideo = false;
+
+    public function setFlv($uint8) {
+        $this->stop = false;
+        $this->arrTag = [];
+        $this->index = 0;
+        $this->tempUint8 = $uint8;
+        
+        if (count($this->tempUint8) > 13 && 
+            $this->tempUint8[0] == 70 && 
+            $this->tempUint8[1] == 76 && 
+            $this->tempUint8[2] == 86) {
+            $this->probe($this->tempUint8);
+            $this->read(9);
+            $this->read(4);
+            $this->parse();
+            $this->frist = false;
+            return $this->offset;
+        } else if (!$this->frist) {
+            return $this->parse();
+        } else {
+            return $this->offset;
+        }
+    }
+
+    public function probe($buffer) {
+        $data = $buffer;
+        $mismatch = ['match' => false];
+
+        if ($data[0] !== 0x46 || $data[1] !== 0x4C || $data[2] !== 0x56 || $data[3] !== 0x01) {
+            return $mismatch;
+        }
+
+        $hasAudio = (($data[4] & 4) >> 2) !== 0;
+        $hasVideo = ($data[4] & 1) !== 0;
+
+        if (!$hasAudio && !$hasVideo) {
+            return $mismatch;
+        }
+        
+        $this->_hasAudio = $hasAudio;
+        $this->_hasVideo = $hasVideo;
+        
+        return [
+            'match' => true,
+            'hasAudioTrack' => $hasAudio,
+            'hasVideoTrack' => $hasVideo
+        ];
+    }
+
+    public function parse() {
+        while ($this->index < count($this->tempUint8) && !$this->stop) {
+            $this->offset = $this->index;
+
+            $t = new FlvTag();
+            if (count($this->tempUint8) - $this->index >= 11) {
+                $read = $this->read(1);
+                $t->tagType = $read[0];
+                $t->dataSize = $this->read(3);
+                $t->Timestamp = $this->read(4);
+                $t->StreamID = $this->read(3);
+            } else {
+                $this->stop = true;
+                continue;
+            }
+            
+            $bodySum = $this->getBodySum($t->dataSize);
+            if (count($this->tempUint8) - $this->index >= ($bodySum + 4)) {
+                $t->body = $this->read($bodySum);
+                if ($t->tagType == 9 && $this->_hasVideo) {
+                    $this->arrTag[] = $t;
+                }
+                if ($t->tagType == 8 && $this->_hasAudio) {
+                    $this->arrTag[] = $t;
+                }
+                if ($t->tagType == 18) {
+                    if (count($this->arrTag) == 0) {
+                        $this->arrTag[] = $t;
+                    }
+                }
+                $t->size = $this->read(4);
+            } else {
+                $this->stop = true;
+                continue;
+            }
+            $this->offset = $this->index;
+        }
+
+        return $this->offset;
+    }
+
+    private function read($length) {
+        $u8a = array_slice($this->tempUint8, $this->index, $length);
+        $this->index += $length;
+        return $u8a;
+    }
+
+    private function getBodySum($arr) {
+        $_str = '';
+        $_str .= (strlen(dechex($arr[0])) == 1 ? '0' . dechex($arr[0]) : dechex($arr[0]));
+        $_str .= (strlen(dechex($arr[1])) == 1 ? '0' . dechex($arr[1]) : dechex($arr[1]));
+        $_str .= (strlen(dechex($arr[2])) == 1 ? '0' . dechex($arr[2]) : dechex($arr[2]));
+        return hexdec($_str);
+    }
+}
+?>
