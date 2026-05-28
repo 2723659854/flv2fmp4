@@ -14,21 +14,29 @@ if (file_exists($flv)) {
     exit;
 }
 
+// 创建output目录
+if (!is_dir(__DIR__.'/output')) {
+    mkdir(__DIR__.'/output', 0777, true);
+}
+
+// 收集所有数据
+$initData = null;
 $segmentCount = 0;
-$audioCount = 0;
-$videoCount = 0;
+$allSegments = [];
 
 // 设置初始化段回调（生成 MP4 的 ftyp 和 moov 盒）
-$flv2fmp4->onInitSegment = function ($data) {
+$flv2fmp4->onInitSegment = function ($data) use (&$initData) {
     echo "onInitSegment called! data length: " . count($data) . " bytes\r\n";
+    $initData = $data;
     file_put_contents(__DIR__.'/output/init.mp4', pack('C*', ...$data));
     echo "init.mp4 saved\r\n";
 };
 
 // 设置媒体段回调（生成 m4s 媒体片段）
-$flv2fmp4->onMediaSegment = function ($data) use (&$segmentCount) {
+$flv2fmp4->onMediaSegment = function ($data) use (&$segmentCount, &$allSegments) {
     $segmentCount++;
     echo "onMediaSegment called! segment #$segmentCount, data length: " . count($data) . " bytes\r\n";
+    $allSegments[] = $data;
     file_put_contents(__DIR__.'/output/segment_' . $segmentCount . '.m4s', pack('C*', ...$data));
 };
 
@@ -44,11 +52,6 @@ $flv2fmp4->onMediaInfo = function ($mediaInfo, $tracks) {
     echo "  Tracks: " . ($tracks['hasAudio'] ? 'hasAudio ' : '') . ($tracks['hasVideo'] ? 'hasVideo' : '') . "\r\n";
 };
 
-// 创建output目录
-if (!is_dir(__DIR__.'/output')) {
-    mkdir(__DIR__.'/output', 0777, true);
-}
-
 echo "Loading FLV file...\r\n";
 $flvData = file_get_contents($flv);
 $flvBytes = unpack('C*', $flvData);
@@ -59,3 +62,16 @@ echo "Calling setflv()...\r\n";
 $offset = $flv2fmp4->setflv($flvArray);
 echo "setflv() completed, offset: $offset\r\n";
 echo "Total segments created: $segmentCount\r\n";
+
+// 合并生成完整的 MP4 文件
+if ($initData !== null && count($allSegments) > 0) {
+    $outputFile = __DIR__.'/output/output.mp4';
+
+    // 将所有数据合并
+    $allData = array_merge($initData, ...$allSegments);
+
+    file_put_contents($outputFile, pack('C*', ...$allData));
+    echo "MP4 file saved: $outputFile (" . filesize($outputFile) . " bytes)\r\n";
+} else {
+    echo "Warning: No data to save\r\n";
+}
