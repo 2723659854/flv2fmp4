@@ -17,6 +17,15 @@ if (file_exists($flv)) {
 // 创建output目录
 if (!is_dir(__DIR__.'/output')) {
     mkdir(__DIR__.'/output', 0777, true);
+} else {
+    // 清空output目录中的文件
+    $files = glob(__DIR__.'/output/*');
+    foreach ($files as $file) {
+        if (is_file($file)) {
+            unlink($file);
+        }
+    }
+    echo "output目录已清空\r\n";
 }
 
 // 收集所有数据

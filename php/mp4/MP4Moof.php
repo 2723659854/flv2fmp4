@@ -506,9 +506,18 @@ class MP4Remuxer {
                 $dataOffset += count($unit);
                 $audioOffset++;
             } else if ($videoSample !== null) {
+                // 视频样本需要添加 NALU 长度前缀
                 $unit = [];
                 foreach ($videoSample['units'] as $u) {
-                    $unit = array_merge($unit, $u['data']);
+                    $naluData = $u['data'];
+                    $naluSize = count($naluData);
+                    // 添加 4 字节长度前缀
+                    $unit[] = ($naluSize >> 24) & 0xFF;
+                    $unit[] = ($naluSize >> 16) & 0xFF;
+                    $unit[] = ($naluSize >> 8) & 0xFF;
+                    $unit[] = $naluSize & 0xFF;
+                    // 添加 NALU 数据
+                    $unit = array_merge($unit, $naluData);
                 }
                 $mixedSamples[] = ['type' => 'video', 'sample' => $videoSample, 'offset' => $dataOffset, 'unit' => $unit];
                 $dataOffset += count($unit);

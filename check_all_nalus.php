@@ -1,56 +1,95 @@
 <?php
+// 检查视频样本中的所有NALU
+$filePath = __DIR__ . '/test.flv';
+$fileData = file_get_contents($filePath);
+$bytes = unpack('C*', $fileData);
+$arrayBuffer = array_values($bytes);
 
-ini_set('memory_limit', '512M');
+echo "FLV file size: " . count($arrayBuffer) . " bytes\n\n";
 
-require_once 'php/flv/FlvParse.php';
+// FLV 头部
+$headerSize = ($arrayBuffer[5] << 24) | ($arrayBuffer[6] << 16) | ($arrayBuffer[7] << 8) | $arrayBuffer[8];
+echo "Header size: $headerSize\n";
 
-$flv = __DIR__.'/test.flv';
-$flvData = file_get_contents($flv);
-$flvBytes = unpack('C*', $flvData);
-$flvArray = array_values($flvBytes);
+$offset = $headerSize + 4; // 跳过头部和 previousTagSize0
 
-$parser = new FlvParse();
-$parser->setFlv($flvArray);
-
-echo "Finding video data tags...\n";
-
-$videoTagCount = 0;
-for ($i = 0; $i < count($parser->arrTag); $i++) {
-    $tag = $parser->arrTag[$i];
-    if ($tag->tagType == 9 && count($tag->body) > 1) {
-        $spec = $tag->body[0];
-        $frameType = ($spec & 240) >> 4;
-        $codecId = $spec & 15;
-
-        if ($codecId == 7 && count($tag->body) > 1) {
-            $packetType = $tag->body[1];
-            $videoTagCount++;
-
-            if ($packetType == 1 && $videoTagCount <= 2) {
-                echo "Video data tag #$videoTagCount at tag $i, packetType=$packetType, frameType=$frameType\n";
-                echo "Body size: " . count($tag->body) . "\n";
-
-                // Parse all NALUs in this tag
-                $offset = 5; // NALU data starts at index 5
-                $naluCount = 0;
-
-                while ($offset + 4 <= count($tag->body)) {
-                    $naluLen = ($tag->body[$offset] << 24) | ($tag->body[$offset + 1] << 16) | ($tag->body[$offset + 2] << 8) | $tag->body[$offset + 3];
-                    $naluType = $tag->body[$offset + 4] & 0x1F;
-
-                    echo "  NALU #$naluCount: length=$naluLen, type=$naluType\n";
-
-                    if ($naluLen > 0 && $offset + 4 + $naluLen <= count($tag->body)) {
-                        $offset += 4 + $naluLen;
+// 找到第一个视频标签
+while ($offset < count($arrayBuffer) - 11) {
+    $tagType = $arrayBuffer[$offset];
+    
+    if ($tagType == 9) { // Video tag
+        $dataSize = ($arrayBuffer[$offset+1] << 16) | ($arrayBuffer[$offset+2] << 8) | $arrayBuffer[$offset+3];
+        $timestamp = ($arrayBuffer[$offset+4] << 16) | ($arrayBuffer[$offset+5] << 8) | $arrayBuffer[$offset+6];
+        
+        $videoDataOffset = $offset + 11;
+        if ($videoDataOffset + 1 < count($arrayBuffer)) {
+            $frameType = ($arrayBuffer[$videoDataOffset] >> 4) & 0x0F;
+            $codecId = $arrayBuffer[$videoDataOffset] & 0x0F;
+            
+            if ($codecId == 7) { // AVC
+                $avcPacketType = $arrayBuffer[$videoDataOffset + 1];
+                
+                if ($avcPacketType == 1) { // NALU data
+                    echo "Found video tag at offset $offset\n";
+                    echo "  Data size: $dataSize\n";
+                    echo "  Timestamp: $timestamp\n";
+                    echo "  Frame Type: " . ($frameType == 1 ? "Keyframe" : "Inter frame") . "\n";
+                    
+                    // 解析所有NALU
+                    $naluOffset = $videoDataOffset + 5;
+                    $naluLengthSize = 4;
+                    $totalSize = $dataSize - 5; // 减去AVC packet type和composition time
+                    $currentOffset = 0;
+                    $naluCount = 0;
+                    
+                    echo "\n  NALUs in this tag:\n";
+                    while ($currentOffset < $totalSize) {
+                        if ($currentOffset + $naluLengthSize > $totalSize) {
+                            break;
+                        }
+                        
+                        $naluSize = ($arrayBuffer[$naluOffset + $currentOffset] << 24) | 
+                                    ($arrayBuffer[$naluOffset + $currentOffset + 1] << 16) | 
+                                    ($arrayBuffer[$naluOffset + $currentOffset + 2] << 8) | 
+                                    $arrayBuffer[$naluOffset + $currentOffset + 3];
+                        
+                        if ($naluSize == 0) {
+                            $currentOffset += $naluLengthSize;
+                            continue;
+                        }
+                        
+                        $naluType = $arrayBuffer[$naluOffset + $currentOffset + $naluLengthSize] & 0x1F;
+                        $naluTypeName = [
+                            1 => 'Coded slice (non-IDR)',
+                            5 => 'Coded slice (IDR)',
+                            6 => 'SEI',
+                            7 => 'SPS',
+                            8 => 'PPS'
+                        ][$naluType] ?? 'Unknown (' . $naluType . ')';
+                        
+                        echo "    NALU $naluCount: Type=$naluTypeName (" . dechex($naluType) . "), Size=$naluSize\n";
+                        
+                        // 显示前10字节
+                        echo "    First 10 bytes: ";
+                        for ($i = 0; $i < min(10, $naluSize); $i++) {
+                            printf("%02X ", $arrayBuffer[$naluOffset + $currentOffset + $naluLengthSize + $i]);
+                        }
+                        echo "\n";
+                        
+                        $currentOffset += $naluLengthSize + $naluSize;
                         $naluCount++;
-                    } else {
-                        echo "  Invalid NALU length, stopping\n";
-                        break;
                     }
+                    
+                    echo "\n  Total NALUs: $naluCount\n";
+                    echo "  Bytes processed: $currentOffset\n";
+                    break;
                 }
-                echo "\n";
             }
         }
     }
+    
+    // 跳到下一个标签
+    $dataSize = ($arrayBuffer[$offset+1] << 16) | ($arrayBuffer[$offset+2] << 8) | $arrayBuffer[$offset+3];
+    $offset += 11 + $dataSize + 4; // tag header + body + previousTagSize
 }
 ?>

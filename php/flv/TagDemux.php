@@ -409,7 +409,7 @@ class TagDemux {
                 $keyframe = true;
             }
 
-            $data = array_slice($arrayBuffer, $dataOffset + $offset, $lengthSize + $naluSize);
+            $data = array_slice($arrayBuffer, $dataOffset + $offset + $lengthSize, $naluSize);
             $unit = ['type' => $unitType, 'data' => $data];
             $units[] = $unit;
             $length += count($data);
@@ -431,6 +431,7 @@ class TagDemux {
             }
             $this->_videoTrack['samples'][] = $avcSample;
             $this->_videoTrack['length'] += $length;
+            $this->_dispatch = true;
         }
     }
 
@@ -525,6 +526,7 @@ class TagDemux {
             $aacSample = ['unit' => $aacData['data'], 'dts' => $dts, 'pts' => $dts];
             $this->_audioTrack['samples'][] = $aacSample;
             $this->_audioTrack['length'] += count($aacData['data']);
+            $this->_dispatch = true;
         }
     }
 
