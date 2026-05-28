@@ -93,13 +93,13 @@ class Flv2Fmp4 {
 
     public function onMdiaSegment($track, $value) {
         if ($this->onMediaSegment) {
-            $this->onMediaSegment($value['data']);
+            ($this->onMediaSegment)($value['data']);
         }
         if ($this->_pendingResolveSeekPoint != -1 && $track == 'video') {
             $seekpoint = $this->_pendingResolveSeekPoint;
             $this->_pendingResolveSeekPoint = -1;
             if ($this->seekCallBack) {
-                $this->seekCallBack($seekpoint);
+                ($this->seekCallBack)($seekpoint);
             }
         }
     }
@@ -108,7 +108,7 @@ class Flv2Fmp4 {
         switch ($type) {
             case 'video':
                 $this->metas[] = $meta;
-                $this->_m4mof->_videoMeta = $meta;
+                $this->_m4mof->setVideoMeta($meta);
                 if ($this->hasVideo && !$this->hasAudio) {
                     $this->metaSucc();
                     return;
@@ -116,7 +116,7 @@ class Flv2Fmp4 {
                 break;
             case 'audio':
                 $this->metas[] = $meta;
-                $this->_m4mof->_audioMeta = $meta;
+                $this->_m4mof->setAudioMeta($meta);
                 if (!$this->hasVideo && $this->hasAudio) {
                     $this->metaSucc();
                     return;
@@ -130,8 +130,8 @@ class Flv2Fmp4 {
 
     public function metaSucc($mi = null) {
         if ($this->onMediaInfo) {
-            $mediaInfo = $mi ?: $this->_tagDemux->_mediaInfo;
-            $this->onMediaInfo($mediaInfo, ['hasAudio' => $this->hasAudio, 'hasVideo' => $this->hasVideo]);
+            $mediaInfo = $mi ?: $this->_tagDemux->getMediaInfo();
+            ($this->onMediaInfo)($mediaInfo, ['hasAudio' => $this->hasAudio, 'hasVideo' => $this->hasVideo]);
         }
         
         if (count($this->metas) == 0) {
@@ -145,7 +145,7 @@ class Flv2Fmp4 {
         
         $this->ftyp_moov = MP4::generateInitSegment($this->metas);
         if ($this->onInitSegment && $this->loadmetadata == false) {
-            $this->onInitSegment($this->ftyp_moov);
+            ($this->onInitSegment)($this->ftyp_moov);
             $this->loadmetadata = true;
         }
     }

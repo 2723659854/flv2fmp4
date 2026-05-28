@@ -67,6 +67,10 @@ class TagDemux {
         $this->_mediaInfo->hasAudio = $this->_hasAudio = $s;
     }
 
+    public function getMediaInfo() {
+        return $this->_mediaInfo;
+    }
+
     public function setHasVideo($s) {
         $this->_mediaInfo->hasVideo = $this->_hasVideo = $s;
     }
@@ -173,7 +177,9 @@ class TagDemux {
         }
         if ($this->_isInitialMetadataDispatched()) {
             if ($this->_dispatch && ($this->_audioTrack['length'] || $this->_videoTrack['length'])) {
-                $this->_onDataAvailable($this->_audioTrack, $this->_videoTrack);
+                if ($this->_onDataAvailable) {
+                    ($this->_onDataAvailable)($this->_audioTrack, $this->_videoTrack);
+                }
             }
         }
     }
@@ -328,7 +334,9 @@ class TagDemux {
                 $mi->mimeType = 'video/x-flv; codecs="' . $mi->videoCodec . '"';
             }
             if ($mi->isComplete()) {
-                $this->_onMediaInfo($mi);
+                if ($this->_onMediaInfo) {
+                    ($this->_onMediaInfo)($mi);
+                }
             }
         }
 
@@ -354,14 +362,18 @@ class TagDemux {
 
         if ($this->_isInitialMetadataDispatched()) {
             if ($this->_dispatch && ($this->_audioTrack['length'] || $this->_videoTrack['length'])) {
-                $this->_onDataAvailable($this->_audioTrack, $this->_videoTrack);
+                if ($this->_onDataAvailable) {
+                    ($this->_onDataAvailable)($this->_audioTrack, $this->_videoTrack);
+                }
             }
         } else {
             $this->_videoInitialMetadataDispatched = true;
         }
 
         $this->_dispatch = false;
-        $this->_onTrackMetadata('video', $meta);
+        if ($this->_onTrackMetadata) {
+            ($this->_onTrackMetadata)('video', $meta);
+        }
     }
 
     public function timestampBase($i) {
@@ -479,14 +491,18 @@ class TagDemux {
 
             if ($this->_isInitialMetadataDispatched()) {
                 if ($this->_dispatch && ($this->_audioTrack['length'] || $this->_videoTrack['length'])) {
-                    $this->_onDataAvailable($this->_audioTrack, $this->_videoTrack);
+                    if ($this->_onDataAvailable) {
+                        ($this->_onDataAvailable)($this->_audioTrack, $this->_videoTrack);
+                    }
                 }
             } else {
                 $this->_audioInitialMetadataDispatched = true;
             }
 
             $this->_dispatch = false;
-            $this->_onTrackMetadata('audio', $meta);
+            if ($this->_onTrackMetadata) {
+                ($this->_onTrackMetadata)('audio', $meta);
+            }
 
             $mi = $this->_mediaInfo;
             $mi->audioCodec = 'mp4a.40.' . $misc['originalAudioObjectType'];
@@ -500,7 +516,9 @@ class TagDemux {
                 $mi->mimeType = 'video/x-flv; codecs="' . $mi->audioCodec . '"';
             }
             if ($mi->isComplete()) {
-                $this->_onDataAvailable($this->_audioTrack, $this->_videoTrack);
+                if ($this->_onDataAvailable) {
+                    ($this->_onDataAvailable)($this->_audioTrack, $this->_videoTrack);
+                }
             }
             return;
         } else if ($aacData['packetType'] === 1) {

@@ -58,6 +58,14 @@ class MP4Remuxer {
         $this->_onMediaSegment = $callback;
     }
 
+    public function setVideoMeta($meta) {
+        $this->_videoMeta = $meta;
+    }
+
+    public function setAudioMeta($meta) {
+        $this->_audioMeta = $meta;
+    }
+
     public function insertDiscontinuity() {
         $this->_audioNextDts = $this->_videoNextDts = null;
     }
