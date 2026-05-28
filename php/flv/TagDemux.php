@@ -418,7 +418,6 @@ class TagDemux {
         }
 
         if (count($units)) {
-            $track = $this->_videoTrack;
             $avcSample = [
                 'units' => $units,
                 'length' => $length,
@@ -430,8 +429,8 @@ class TagDemux {
             if ($keyframe) {
                 $avcSample['fileposition'] = $tagPosition;
             }
-            $track['samples'][] = $avcSample;
-            $track['length'] += $length;
+            $this->_videoTrack['samples'][] = $avcSample;
+            $this->_videoTrack['length'] += $length;
         }
     }
 
@@ -524,8 +523,8 @@ class TagDemux {
         } else if ($aacData['packetType'] === 1) {
             $dts = $this->_timestampBase + $tagTimestamp;
             $aacSample = ['unit' => $aacData['data'], 'dts' => $dts, 'pts' => $dts];
-            $track['samples'][] = $aacSample;
-            $track['length'] += count($aacData['data']);
+            $this->_audioTrack['samples'][] = $aacSample;
+            $this->_audioTrack['length'] += count($aacData['data']);
         }
     }
 

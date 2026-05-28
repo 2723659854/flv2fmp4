@@ -32,8 +32,9 @@ class ExpGolomb {
         for ($i = 0; $i < $bytes_read; $i++) {
             $word[$i] = $this->_buffer[$this->_buffer_index + $i];
         }
-        
+
         $this->_current_word = ($word[0] << 24) | ($word[1] << 16) | ($word[2] << 8) | $word[3];
+        $this->_current_word = $this->_current_word & 0xFFFFFFFF;
         $this->_buffer_index += $bytes_read;
         $this->_current_word_bits_left = $bytes_read * 8;
     }
@@ -44,21 +45,26 @@ class ExpGolomb {
         }
 
         if ($bits <= $this->_current_word_bits_left) {
-            $result = $this->_current_word >> (32 - $bits);
-            $this->_current_word <<= $bits;
+            $shift = 32 - $bits;
+            $result = ($this->_current_word >> $shift) & (0xFFFFFFFF >> (32 - $bits));
+            $this->_current_word = ($this->_current_word << $bits) & 0xFFFFFFFF;
             $this->_current_word_bits_left -= $bits;
             return $result;
         }
 
-        $result = $this->_current_word_bits_left ? $this->_current_word : 0;
-        $result = $result >> (32 - $this->_current_word_bits_left);
+        $result = 0;
+        if ($this->_current_word_bits_left > 0) {
+            $result = $this->_current_word & (0xFFFFFFFF >> (32 - $this->_current_word_bits_left));
+        }
         $bits_need_left = $bits - $this->_current_word_bits_left;
+        $this->_current_word_bits_left = 0;
 
         $this->_fillCurrentWord();
         $bits_read_next = min($bits_need_left, $this->_current_word_bits_left);
 
-        $result2 = $this->_current_word >> (32 - $bits_read_next);
-        $this->_current_word <<= $bits_read_next;
+        $shift = 32 - $bits_read_next;
+        $result2 = ($this->_current_word >> $shift) & (0xFFFFFFFF >> (32 - $bits_read_next));
+        $this->_current_word = ($this->_current_word << $bits_read_next) & 0xFFFFFFFF;
         $this->_current_word_bits_left -= $bits_read_next;
 
         $result = ($result << $bits_read_next) | $result2;
@@ -77,7 +83,7 @@ class ExpGolomb {
         $zero_count = 0;
         for ($zero_count = 0; $zero_count < $this->_current_word_bits_left; $zero_count++) {
             if (($this->_current_word & (0x80000000 >> $zero_count)) !== 0) {
-                $this->_current_word <<= $zero_count;
+                $this->_current_word = ($this->_current_word << $zero_count) & 0xFFFFFFFF;
                 $this->_current_word_bits_left -= $zero_count;
                 return $zero_count;
             }

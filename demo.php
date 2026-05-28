@@ -14,6 +14,10 @@ if (file_exists($flv)) {
     exit;
 }
 
+$segmentCount = 0;
+$audioCount = 0;
+$videoCount = 0;
+
 // 设置初始化段回调（生成 MP4 的 ftyp 和 moov 盒）
 $flv2fmp4->onInitSegment = function ($data) {
     echo "onInitSegment called! data length: " . count($data) . " bytes\r\n";
@@ -22,8 +26,7 @@ $flv2fmp4->onInitSegment = function ($data) {
 };
 
 // 设置媒体段回调（生成 m4s 媒体片段）
-$flv2fmp4->onMediaSegment = function ($data) {
-    static $segmentCount = 0;
+$flv2fmp4->onMediaSegment = function ($data) use (&$segmentCount) {
     $segmentCount++;
     echo "onMediaSegment called! segment #$segmentCount, data length: " . count($data) . " bytes\r\n";
     file_put_contents(__DIR__.'/output/segment_' . $segmentCount . '.m4s', pack('C*', ...$data));
@@ -38,6 +41,7 @@ $flv2fmp4->onMediaInfo = function ($mediaInfo, $tracks) {
         echo "  Duration: {$mediaInfo->duration}\r\n";
         echo "  MIME: {$mediaInfo->mimeType}\r\n";
     }
+    echo "  Tracks: " . ($tracks['hasAudio'] ? 'hasAudio ' : '') . ($tracks['hasVideo'] ? 'hasVideo' : '') . "\r\n";
 };
 
 // 创建output目录
@@ -54,3 +58,4 @@ echo "FLV file loaded, size: " . count($flvArray) . " bytes\r\n";
 echo "Calling setflv()...\r\n";
 $offset = $flv2fmp4->setflv($flvArray);
 echo "setflv() completed, offset: $offset\r\n";
+echo "Total segments created: $segmentCount\r\n";

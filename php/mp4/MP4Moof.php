@@ -102,7 +102,7 @@ class MP4Remuxer {
         if (!$this->_onInitSegment) {
             throw new Exception('MP4Remuxer: onInitSegment callback must be specified!');
         }
-        $this->_onInitSegment($type, [
+        ($this->_onInitSegment)($type, [
             'type' => $type,
             'data' => $metabox,
             'codec' => $metadata['codec'],
@@ -294,7 +294,7 @@ class MP4Remuxer {
         $track['samples'] = [];
         $track['length'] = 0;
 
-        $this->_onMediaSegment('audio', [
+        ($this->_onMediaSegment)('audio', [
             'type' => 'audio',
             'data' => array_merge($moofbox, $mdatbox),
             'sampleCount' => count($mp4Samples),
@@ -470,7 +470,7 @@ class MP4Remuxer {
         $track['samples'] = [];
         $track['length'] = 0;
 
-        $this->_onMediaSegment('video', [
+        ($this->_onMediaSegment)('video', [
             'type' => 'video',
             'data' => array_merge($moofbox, $mdatbox),
             'sampleCount' => count($mp4Samples),
