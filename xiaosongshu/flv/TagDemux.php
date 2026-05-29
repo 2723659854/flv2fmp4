@@ -142,6 +142,7 @@ class TagDemux
             if (isset($onMetaData['duration']) && is_numeric($onMetaData['duration'])) {
                 if (!$this->_durationOverrided) {
                     $duration = (int)($onMetaData['duration'] * $this->_timescale);
+                    if ($duration < 0) $duration = 0; // 防止负数
                     $this->_duration = $duration;
                     $this->_mediaInfo->duration = $duration;
                 }
@@ -560,7 +561,7 @@ class TagDemux
             $config[3] = 0;
         }
         return [
-            'config' => $config,
+            'config' => pack('C*', ...$config),  // 将整数数组转为二进制字符串
             'samplingRate' => $samplingFrequence,
             'channelCount' => $channelConfig,
             'codec' => 'mp4a.40.' . $audioObjectType,
