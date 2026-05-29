@@ -96,11 +96,17 @@ echo "生成文件数: " . (1 + count($segments)) . "\n";
 $ffmpegPath = 'D:\\ffmpeg\\bin\\ffmpeg.exe';
 if (file_exists($ffmpegPath)) {
     echo "\n=== 使用 FFmpeg 验证 ===\n";
-    $cmd = escapeshellcmd("$ffmpegPath -v error -i \"$outputDir/output.mp4\" -f null - 2>&1");
-    $output = shell_exec($cmd);
-    if (trim($output)) {
-        echo "FFmpeg 错误:\n$output\n";
-    } else {
-        echo "FFmpeg 验证通过!\n";
+    // 在Windows上使用临时文件来捕获错误输出
+    $errorLog = $outputDir . '/ffmpeg_error.log';
+    $cmd = "\"$ffmpegPath\" -v error -i \"$outputDir/output.mp4\" -f null - 2> \"$errorLog\"";
+    shell_exec($cmd);
+    if (file_exists($errorLog)) {
+        $output = file_get_contents($errorLog);
+        unlink($errorLog);
+        if (trim($output)) {
+            echo "FFmpeg 错误:\n$output\n";
+        } else {
+            echo "FFmpeg 验证通过!\n";
+        }
     }
 }

@@ -212,7 +212,7 @@ class MP4Remuxer
                 'size' => strlen($unit),
                 'duration' => $sampleDuration,
                 'originalDts' => $originalDts,
-                'flags' => ['isLeading'=>0, 'dependsOn'=>1, 'isDependedOn'=>0, 'hasRedundancy'=>0]
+                'flags' => ['isLeading'=>0, 'dependsOn'=>1, 'isDependedOn'=>0, 'hasRedundancy'=>0, 'isNonSync'=>1]
             ];
             $mp4Samples[] = $mp4Sample;
             $mdatChunks[] = $unit;
@@ -310,10 +310,17 @@ class MP4Remuxer
                 $firstPts = $pts;
             }
             $sampleSize = 0;
+            // 如果是关键帧，在前面添加SPS和PPS
+            if ($keyframe && !empty($this->_videoMeta['sps']) && !empty($this->_videoMeta['pps'])) {
+                $mdatChunks[] = "\x00\x00\x00\x01" . $this->_videoMeta['sps'];
+                $mdatChunks[] = "\x00\x00\x00\x01" . $this->_videoMeta['pps'];
+                $sampleSize += 4 + strlen($this->_videoMeta['sps']) + 4 + strlen($this->_videoMeta['pps']);
+            }
             foreach ($avcSample['units'] as $unit) {
                 $data = $unit['data'];
-                $mdatChunks[] = $data;
-                $sampleSize += strlen($data);
+                // 在MP4中，每个NALU前面需要添加起始码
+                $mdatChunks[] = "\x00\x00\x00\x01" . $data;
+                $sampleSize += 4 + strlen($data);
             }
             $sampleDuration = 0;
             if (count($samples) >= 1) {

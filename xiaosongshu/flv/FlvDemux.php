@@ -28,7 +28,7 @@ class FlvDemux
 
     public static function readFloat64BE($data, $offset)
     {
-        return unpack('J', substr($data, $offset, 8))[1];
+        return unpack('G', substr($data, $offset, 8))[1];
     }
 
     public static function decodeUTF8($bytes)

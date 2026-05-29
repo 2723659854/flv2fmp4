@@ -109,8 +109,8 @@ class MP4
     {
         $trackId = $meta['id'];
         $duration = $meta['duration'];
-        $width = $meta['presentWidth'];
-        $height = $meta['presentHeight'];
+        $width = isset($meta['presentWidth']) ? $meta['presentWidth'] : 0;
+        $height = isset($meta['presentHeight']) ? $meta['presentHeight'] : 0;
         $data = pack('C*',
             0x00,0x00,0x00,0x07,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
             ($trackId>>24)&0xFF, ($trackId>>16)&0xFF, ($trackId>>8)&0xFF, $trackId&0xFF,
@@ -302,6 +302,7 @@ class MP4
         $samples = $track['samples'] ?? [];
         $sampleCount = count($samples);
         $dataSize = 12 + 16 * $sampleCount;
+        $offset += 8 + $dataSize;
         $data = pack('C*',
             0x00,0x00,0x0F,0x01,
             ($sampleCount>>24)&0xFF, ($sampleCount>>16)&0xFF, ($sampleCount>>8)&0xFF, $sampleCount&0xFF,

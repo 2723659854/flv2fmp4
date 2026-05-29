@@ -247,6 +247,10 @@ class TagDemux
         for ($i = 0; $i < 3; $i++) {
             $cts = ($cts << 8) | ord($arrayBuffer[$dataOffset + 1 + $i]);
         }
+        // CTS是有符号的24位整数，需要处理负数情况
+        if ($cts & 0x800000) {
+            $cts -= 0x1000000;
+        }
         if ($packetType == 0) {
             $this->_parseAVCDecoderConfigurationRecord($arrayBuffer, $dataOffset + 4, $dataSize - 4);
         } elseif ($packetType == 1) {
@@ -345,13 +349,18 @@ class TagDemux
             return;
         }
         $offset++;
+        $ppsData = '';
         for ($i = 0; $i < $ppsCount; $i++) {
             $len = unpack('n', substr($arrayBuffer, $dataOffset + $offset, 2))[1];
             $offset += 2;
             if ($len == 0) continue;
+            $ppsData = substr($arrayBuffer, $dataOffset + $offset, $len);
             $offset += $len;
         }
         $meta['avcc'] = substr($arrayBuffer, $dataOffset, $dataSize);
+        // 保存SPS和PPS数据，用于在关键帧前面添加
+        $meta['sps'] = $sps ?? '';
+        $meta['pps'] = $ppsData;
         error_log($this->TAG . ' Parsed AVCDecoderConfigurationRecord');
         if ($this->_isInitialMetadataDispatched()) {
             if ($this->_dispatch && (count($this->_audioTrack['samples']) || count($this->_videoTrack['samples']))) {
@@ -394,7 +403,8 @@ class TagDemux
             }
             $unitType = (ord($arrayBuffer[$dataOffset + $offset + $lengthSize]) & 0x1F);
             if ($unitType == 5) $keyframe = true;
-            $data = substr($arrayBuffer, $dataOffset + $offset, $lengthSize + $naluSize);
+            // NALU数据不包含长度前缀，只获取实际的NALU内容
+            $data = substr($arrayBuffer, $dataOffset + $offset + $lengthSize, $naluSize);
             $units[] = ['type' => $unitType, 'data' => $data];
             $length += strlen($data);
             $offset += $lengthSize + $naluSize;
