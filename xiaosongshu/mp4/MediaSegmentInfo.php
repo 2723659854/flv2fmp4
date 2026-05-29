@@ -10,9 +10,9 @@ class MediaSegmentInfo
     public $endPts;
     public $originalBeginDts;
     public $originalEndDts;
-    public $syncPoints;    // array of SampleInfo, for video IDR frames only
-    public $firstSample;   // SampleInfo
-    public $lastSample;    // SampleInfo
+    public $syncPoints;
+    public $firstSample;
+    public $lastSample;
 
     public function __construct()
     {
@@ -27,7 +27,6 @@ class MediaSegmentInfo
         $this->lastSample = null;
     }
 
-    // also called Random Access Point
     public function appendSyncPoint($sampleInfo)
     {
         $sampleInfo->isSyncPoint = true;

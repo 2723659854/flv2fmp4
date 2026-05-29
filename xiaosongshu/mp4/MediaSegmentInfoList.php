@@ -6,7 +6,7 @@ class MediaSegmentInfoList
 {
     private $_type;
     private $_list = [];
-    private $_lastAppendLocation = -1; // cached last insert location
+    private $_lastAppendLocation = -1;
 
     public function __construct($type)
     {
@@ -37,24 +37,15 @@ class MediaSegmentInfoList
     private function _searchNearestSegmentBefore($originalBeginDts)
     {
         $list = $this->_list;
-        if (count($list) === 0) {
-            return -2;
-        }
+        if (count($list) === 0) return -2;
         $last = count($list) - 1;
-
-        if ($originalBeginDts < $list[0]->originalBeginDts) {
-            return -1;
-        }
-
+        if ($originalBeginDts < $list[0]->originalBeginDts) return -1;
         $lbound = 0;
         $ubound = $last;
         $idx = 0;
-
         while ($lbound <= $ubound) {
             $mid = $lbound + (int)(($ubound - $lbound) / 2);
-            if ($mid === $last ||
-                ($originalBeginDts > $list[$mid]->lastSample->originalDts &&
-                    $originalBeginDts < $list[$mid + 1]->originalBeginDts)) {
+            if ($mid === $last || ($originalBeginDts > $list[$mid]->lastSample->originalDts && $originalBeginDts < $list[$mid+1]->originalBeginDts)) {
                 $idx = $mid;
                 break;
             } elseif ($list[$mid]->originalBeginDts < $originalBeginDts) {
@@ -77,20 +68,15 @@ class MediaSegmentInfoList
         $msi = $mediaSegmentInfo;
         $lastAppendIdx = $this->_lastAppendLocation;
         $insertIdx = 0;
-
-        if ($lastAppendIdx !== -1 &&
-            $lastAppendIdx < count($list) &&
+        if ($lastAppendIdx !== -1 && $lastAppendIdx < count($list) &&
             $msi->originalBeginDts >= $list[$lastAppendIdx]->lastSample->originalDts &&
-            ($lastAppendIdx === count($list) - 1 ||
-                ($lastAppendIdx < count($list) - 1 &&
-                    $msi->originalBeginDts < $list[$lastAppendIdx + 1]->originalBeginDts))) {
-            $insertIdx = $lastAppendIdx + 1; // use cached location idx
+            ($lastAppendIdx === count($list)-1 || ($lastAppendIdx < count($list)-1 && $msi->originalBeginDts < $list[$lastAppendIdx+1]->originalBeginDts))) {
+            $insertIdx = $lastAppendIdx + 1;
         } else {
             if (count($list) > 0) {
                 $insertIdx = $this->_searchNearestSegmentBefore($msi->originalBeginDts) + 1;
             }
         }
-
         $this->_lastAppendLocation = $insertIdx;
         array_splice($list, $insertIdx, 0, [$msi]);
     }
@@ -98,38 +84,26 @@ class MediaSegmentInfoList
     public function getLastSegmentBefore($originalBeginDts)
     {
         $idx = $this->_searchNearestSegmentBefore($originalBeginDts);
-        if ($idx >= 0) {
-            return $this->_list[$idx];
-        } else {
-            return null;
-        }
+        if ($idx >= 0) return $this->_list[$idx];
+        return null;
     }
 
     public function getLastSampleBefore($originalBeginDts)
     {
         $segment = $this->getLastSegmentBefore($originalBeginDts);
-        if ($segment != null) {
-            return $segment->lastSample;
-        } else {
-            return null;
-        }
+        return $segment ? $segment->lastSample : null;
     }
 
     public function getLastSyncPointBefore($originalBeginDts)
     {
         $segmentIdx = $this->_searchNearestSegmentBefore($originalBeginDts);
-        if ($segmentIdx < 0) {
-            return null;
-        }
+        if ($segmentIdx < 0) return null;
         $syncPoints = $this->_list[$segmentIdx]->syncPoints;
         while (count($syncPoints) === 0 && $segmentIdx > 0) {
             $segmentIdx--;
             $syncPoints = $this->_list[$segmentIdx]->syncPoints;
         }
-        if (count($syncPoints) > 0) {
-            return $syncPoints[count($syncPoints) - 1];
-        } else {
-            return null;
-        }
+        if (count($syncPoints) > 0) return $syncPoints[count($syncPoints)-1];
+        return null;
     }
 }
