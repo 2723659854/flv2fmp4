@@ -130,6 +130,7 @@ class MP4Remuxer
         if (!empty($videoTrack['samples']) && count($videoTrack['samples'])) {
             $this->_videoDtsBase = $videoTrack['samples'][0]['dts'];
         }
+        // 确保dtsBase是所有轨道DTS的最小值
         $this->_dtsBase = min($this->_audioDtsBase, $this->_videoDtsBase);
         $this->_dtsBaseInited = true;
     }
@@ -210,9 +211,15 @@ class MP4Remuxer
             if (count($samples) >= 1) {
                 $nextDts = $samples[0]['dts'] - $this->_dtsBase - $dtsCorrection;
                 $sampleDuration = $nextDts - $dts;
+                if ($sampleDuration <= 0) {
+                    $sampleDuration = $refSampleDuration;
+                }
             } else {
                 if (count($mp4Samples) >= 1) {
                     $sampleDuration = $mp4Samples[count($mp4Samples)-1]['duration'];
+                    if ($sampleDuration <= 0) {
+                        $sampleDuration = $refSampleDuration;
+                    }
                 } else {
                     $sampleDuration = $refSampleDuration;
                 }
@@ -226,15 +233,6 @@ class MP4Remuxer
                 'originalDts' => $originalDts,
                 'flags' => ['isLeading'=>0, 'dependsOn'=>1, 'isDependedOn'=>0, 'hasRedundancy'=>0, 'isNonSync'=>1]
             ];
-            // 确保DTS单调递增
-            if (!empty($mp4Samples)) {
-                $prevSample = $mp4Samples[count($mp4Samples)-1];
-                if ($dts <= $prevSample['dts']) {
-                    $dts = $prevSample['dts'] + 1;
-                    $mp4Sample['dts'] = $dts;
-                    $mp4Sample['pts'] = $dts;
-                }
-            }
             $mp4Samples[] = $mp4Sample;
             $mdatChunks[] = $unit;
         }

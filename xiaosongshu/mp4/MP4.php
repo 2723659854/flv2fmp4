@@ -300,9 +300,8 @@ class MP4
             0x00,0x00,0x00,0x00,
             ($baseMediaDecodeTime>>24)&0xFF, ($baseMediaDecodeTime>>16)&0xFF, ($baseMediaDecodeTime>>8)&0xFF, $baseMediaDecodeTime&0xFF
         ));
-        $sdtp = self::sdtp($track);
-        $trun = self::trun($track, strlen($sdtp) + 16 + 16 + 8 + 16 + 8 + 8);
-        return self::box(self::$types['traf'], $tfhd, $tfdt, $trun, $sdtp);
+        $trun = self::trun($track, strlen($tfdt) + 16 + 8 + 16 + 8 + 8);
+        return self::box(self::$types['traf'], $tfhd, $tfdt, $trun);
     }
 
     public static function sdtp($track)
