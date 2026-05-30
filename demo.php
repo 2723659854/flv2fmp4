@@ -82,11 +82,21 @@ try {
 $endTime = microtime(true);
 
 echo "\n=== 合并文件 ===\n";
+//if ($initSegment && !empty($segments)) {
+//    $fullBinary = $initSegment . implode('', $segments);
+//    file_put_contents("$outputDir/333.mp4", $fullBinary);
+//    echo "完整MP4文件大小: " . strlen($fullBinary) . " bytes\n";
+//    echo "已写入: $outputDir/333.mp4\n";
+//}
+
 if ($initSegment && !empty($segments)) {
-    $fullBinary = $initSegment . implode('', $segments);
-    file_put_contents("$outputDir/333.mp4", $fullBinary);
-    echo "完整MP4文件大小: " . strlen($fullBinary) . " bytes\n";
-    echo "已写入: $outputDir/333.mp4\n";
+    $fp = fopen("$outputDir/333.mp4", 'wb');
+    fwrite($fp, $initSegment);
+    foreach ($segments as $segment) {
+        fwrite($fp, $segment);
+    }
+    fclose($fp);
+    echo "完整MP4文件已写入: $outputDir/333.mp4\n";
 }
 
 echo "\n=== 转换完成 ===\n";

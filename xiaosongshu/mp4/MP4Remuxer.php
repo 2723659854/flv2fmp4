@@ -87,6 +87,113 @@ class MP4Remuxer
         $this->_dtsBaseInited = false;
     }
 
+    /**
+     * 这个方法生成的切片很多，但是会卡顿
+     * @param $audioTrack
+     * @param $videoTrack
+     * @return void
+     * @throws \Exception
+     */
+    public function remux3($audioTrack, $videoTrack)
+    {
+        if (!$this->_onMediaSegment) {
+            throw new \Exception('MP4Remuxer: onMediaSegment callback must be specified!');
+        }
+        if (!$this->_dtsBaseInited) {
+            $this->_calculateDtsBase($audioTrack, $videoTrack);
+        }
+
+        $hasVideo = !empty($videoTrack['samples']) && count($videoTrack['samples']) > 0;
+        $hasAudio = !empty($audioTrack['samples']) && count($audioTrack['samples']) > 0;
+
+        if (!$hasVideo && !$hasAudio) return;
+
+        // 计算视频和音频的时间跨度
+        $videoDuration = 0;
+        $audioDuration = 0;
+
+        if ($hasVideo) {
+            $firstVideoDts = $videoTrack['samples'][0]['dts'] - $this->_videoDtsBase;
+            $lastVideoDts = $videoTrack['samples'][count($videoTrack['samples'])-1]['dts'] - $this->_videoDtsBase;
+            $videoDuration = $lastVideoDts - $firstVideoDts;
+        }
+
+        if ($hasAudio) {
+            $firstAudioDts = $audioTrack['samples'][0]['dts'] - $this->_audioDtsBase;
+            $lastAudioDts = $audioTrack['samples'][count($audioTrack['samples'])-1]['dts'] - $this->_audioDtsBase;
+            $audioDuration = $lastAudioDts - $firstAudioDts;
+        }
+
+        // 动态计算chunk大小，目标是总共生成约10-20个segment
+        $totalDuration = max($videoDuration, $audioDuration);
+        $targetSegments = 15; // 目标segment数量
+        $chunkInterval = max(500, intval($totalDuration / $targetSegments)); // 至少500ms
+
+        $audioSamples = $hasAudio ? $audioTrack['samples'] : [];
+        $videoSamples = $hasVideo ? $videoTrack['samples'] : [];
+
+        $audioChunks = [];
+        $videoChunks = [];
+
+        // 将音频样本分成chunks
+        if ($hasAudio) {
+            $chunk = [];
+            $chunkStartDts = null;
+            foreach ($audioSamples as $sample) {
+                $dts = $sample['dts'] - $this->_audioDtsBase;
+                if ($chunkStartDts === null) {
+                    $chunkStartDts = $dts;
+                }
+                $chunk[] = $sample;
+                if ($dts - $chunkStartDts >= $chunkInterval) {
+                    $audioChunks[] = $chunk;
+                    $chunk = [];
+                    $chunkStartDts = null;
+                }
+            }
+            if (!empty($chunk)) {
+                $audioChunks[] = $chunk;
+            }
+        }
+
+        // 将视频样本分成chunks
+        if ($hasVideo) {
+            $chunk = [];
+            $chunkStartDts = null;
+            foreach ($videoSamples as $sample) {
+                $dts = $sample['dts'] - $this->_videoDtsBase;
+                if ($chunkStartDts === null) {
+                    $chunkStartDts = $dts;
+                }
+                $chunk[] = $sample;
+                if ($dts - $chunkStartDts >= $chunkInterval) {
+                    $videoChunks[] = $chunk;
+                    $chunk = [];
+                    $chunkStartDts = null;
+                }
+            }
+            if (!empty($chunk)) {
+                $videoChunks[] = $chunk;
+            }
+        }
+
+        error_log("MP4Remuxer: Video chunks={$videoChunks} Audio chunks={$audioChunks}, interval={$chunkInterval}ms");
+
+        // 交错处理音频和视频chunks
+        $maxChunks = max(count($audioChunks), count($videoChunks));
+        for ($i = 0; $i < $maxChunks; $i++) {
+            if ($i < count($videoChunks)) {
+                $videoTrack['samples'] = $videoChunks[$i];
+                $this->_remuxVideo($videoTrack);
+            }
+            if ($i < count($audioChunks)) {
+                $audioTrack['samples'] = $audioChunks[$i];
+                $this->_remuxAudio($audioTrack);
+            }
+        }
+    }
+
+    // 当前方法生成的切片很多，但是间隔音视频插入不会卡顿
     public function remux($audioTrack, $videoTrack)
     {
         if (!$this->_onMediaSegment) {
