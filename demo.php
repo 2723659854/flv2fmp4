@@ -21,7 +21,7 @@ require_once __DIR__.'/xiaosongshu/mp4/MP4Remuxer.php';
 require_once __DIR__.'/xiaosongshu/mp4/SampleInfo.php';
 require_once __DIR__.'/xiaosongshu/Flv2Fmp4.php';
 
-$inputFile = __DIR__.'/test.flv';
+$inputFile = __DIR__.'/333.flv';
 $outputDir = __DIR__.'/output';
 
 if (!file_exists($inputFile)) {
@@ -84,9 +84,9 @@ $endTime = microtime(true);
 echo "\n=== 合并文件 ===\n";
 if ($initSegment && !empty($segments)) {
     $fullBinary = $initSegment . implode('', $segments);
-    file_put_contents("$outputDir/output.mp4", $fullBinary);
+    file_put_contents("$outputDir/333.mp4", $fullBinary);
     echo "完整MP4文件大小: " . strlen($fullBinary) . " bytes\n";
-    echo "已写入: $outputDir/output.mp4\n";
+    echo "已写入: $outputDir/333.mp4\n";
 }
 
 echo "\n=== 转换完成 ===\n";
@@ -98,7 +98,7 @@ if (file_exists($ffmpegPath)) {
     echo "\n=== 使用 FFmpeg 验证 ===\n";
     // 在Windows上使用临时文件来捕获错误输出
     $errorLog = $outputDir . '/ffmpeg_error.log';
-    $cmd = "\"$ffmpegPath\" -v error -i \"$outputDir/output.mp4\" -f null - 2> \"$errorLog\"";
+    $cmd = "\"$ffmpegPath\" -v error -i \"$outputDir/333.mp4\" -f null - 2> \"$errorLog\"";
     shell_exec($cmd);
     if (file_exists($errorLog)) {
         $output = file_get_contents($errorLog);

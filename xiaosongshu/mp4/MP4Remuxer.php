@@ -170,10 +170,22 @@ class MP4Remuxer
                         }
                     }
                 } else {
-                    $dtsCorrection = $originalDts - $this->_audioNextDts;
+                    // 确保当前样本的DTS大于前一个segment的最后DTS
+                    if ($originalDts <= $this->_audioNextDts) {
+                        $dtsCorrection = $originalDts - ($this->_audioNextDts + 1);
+                    } else {
+                        $dtsCorrection = 0;
+                    }
                 }
             }
             $dts = $originalDts - $dtsCorrection;
+            // 确保DTS单调递增（同一segment内部）
+            if (!empty($mp4Samples)) {
+                $prevSample = $mp4Samples[count($mp4Samples)-1];
+                if ($dts <= $prevSample['dts']) {
+                    $dts = $prevSample['dts'] + 1;
+                }
+            }
             if ($remuxSilentFrame) {
                 $videoSegment = $this->_videoSegmentInfoList->getLastSegmentBefore($originalDts);
                 if ($videoSegment != null && $videoSegment->beginDts < $dts) {
@@ -214,11 +226,24 @@ class MP4Remuxer
                 'originalDts' => $originalDts,
                 'flags' => ['isLeading'=>0, 'dependsOn'=>1, 'isDependedOn'=>0, 'hasRedundancy'=>0, 'isNonSync'=>1]
             ];
+            // 确保DTS单调递增
+            if (!empty($mp4Samples)) {
+                $prevSample = $mp4Samples[count($mp4Samples)-1];
+                if ($dts <= $prevSample['dts']) {
+                    $dts = $prevSample['dts'] + 1;
+                    $mp4Sample['dts'] = $dts;
+                    $mp4Sample['pts'] = $dts;
+                }
+            }
             $mp4Samples[] = $mp4Sample;
             $mdatChunks[] = $unit;
         }
         $latest = $mp4Samples[count($mp4Samples)-1];
         $lastDts = $latest['dts'] + $latest['duration'];
+        // 确保下一个segment的起始DTS大于当前segment的结束DTS
+        if ($this->_audioNextDts !== null && $lastDts <= $this->_audioNextDts) {
+            $lastDts = $this->_audioNextDts + 1;
+        }
         $this->_audioNextDts = $lastDts;
         $mdatData = implode('', $mdatChunks);
         $mdatSize = 8 + strlen($mdatData);

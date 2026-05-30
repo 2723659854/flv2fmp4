@@ -337,8 +337,8 @@ class MP4
             $cts = $sample['cts'];
             $data .= pack('N', $duration);
             $data .= pack('N', $size);
-            $flagsHigh = (($flags['isLeading'] << 6) | ($flags['dependsOn'] << 4));
-            $flagsLow = (($flags['isDependedOn'] << 2) | $flags['hasRedundancy']);
+            $flagsHigh = (($flags['isLeading'] << 2) | $flags['dependsOn']);
+            $flagsLow = (($flags['isDependedOn'] << 6) | ($flags['hasRedundancy'] << 4) | $flags['isNonSync']);
             $data .= pack('C*', $flagsHigh, $flagsLow, 0, 0);
             $data .= pack('N', $cts);
         }
