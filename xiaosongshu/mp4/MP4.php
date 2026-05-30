@@ -300,8 +300,9 @@ class MP4
             0x00,0x00,0x00,0x00,
             ($baseMediaDecodeTime>>24)&0xFF, ($baseMediaDecodeTime>>16)&0xFF, ($baseMediaDecodeTime>>8)&0xFF, $baseMediaDecodeTime&0xFF
         ));
-        $trun = self::trun($track, 16 + 16 + 8 + 16 + 8 + 8);
-        return self::box(self::$types['traf'], $tfhd, $tfdt, $trun);
+        $sdtp = self::sdtp($track);
+        $trun = self::trun($track, strlen($sdtp) + 16 + 16 + 8 + 16 + 8 + 8);
+        return self::box(self::$types['traf'], $tfhd, $tfdt, $trun, $sdtp);
     }
 
     public static function sdtp($track)
@@ -336,10 +337,9 @@ class MP4
             $cts = $sample['cts'];
             $data .= pack('N', $duration);
             $data .= pack('N', $size);
-            $flagsHigh = (($flags['isLeading']<<2) | $flags['dependsOn']);
-            $flagsLow = (($flags['isDependedOn']<<6) | ($flags['hasRedundancy']<<4) | $flags['isNonSync']);
-            $data .= pack('C*', $flagsHigh, $flagsLow);
-            $data .= pack('n', 0);
+            $flagsHigh = (($flags['isLeading'] << 6) | ($flags['dependsOn'] << 4));
+            $flagsLow = (($flags['isDependedOn'] << 2) | $flags['hasRedundancy']);
+            $data .= pack('C*', $flagsHigh, $flagsLow, 0, 0);
             $data .= pack('N', $cts);
         }
         return self::box(self::$types['trun'], $data);
