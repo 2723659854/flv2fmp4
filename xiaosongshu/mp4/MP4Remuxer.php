@@ -77,12 +77,14 @@ class MP4Remuxer
     {
         $this->_audioNextDts = null;
         $this->_videoNextDts = null;
+        $this->_dtsBaseInited = false;
     }
 
     public function seek($originalDts)
     {
         $this->_videoSegmentInfoList->clear();
         $this->_audioSegmentInfoList->clear();
+        $this->_dtsBaseInited = false;
     }
 
     public function remux($audioTrack, $videoTrack)
@@ -93,8 +95,54 @@ class MP4Remuxer
         if (!$this->_dtsBaseInited) {
             $this->_calculateDtsBase($audioTrack, $videoTrack);
         }
-        $this->_remuxVideo($videoTrack);
-        $this->_remuxAudio($audioTrack);
+
+        $hasVideo = !empty($videoTrack['samples']) && count($videoTrack['samples']) > 0;
+        $hasAudio = !empty($audioTrack['samples']) && count($audioTrack['samples']) > 0;
+
+        // 交错处理音频和视频，确保它们在同一个时间窗口内
+        if ($hasVideo && $hasAudio) {
+            // 找到最小的视频DTS和最大的音频DTS
+            $firstVideoDts = $videoTrack['samples'][0]['dts'] - $this->_videoDtsBase;
+            $lastVideoDts = $videoTrack['samples'][count($videoTrack['samples'])-1]['dts'] - $this->_videoDtsBase;
+            $firstAudioDts = $audioTrack['samples'][0]['dts'] - $this->_audioDtsBase;
+            $lastAudioDts = $audioTrack['samples'][count($audioTrack['samples'])-1]['dts'] - $this->_audioDtsBase;
+
+            // 分离音频样本：在视频时间范围内的和不在范围内的
+            $audioInRange = [];
+            $audioOutOfRange = [];
+
+            foreach ($audioTrack['samples'] as $sample) {
+                $audioDts = $sample['dts'] - $this->_audioDtsBase;
+                if ($audioDts >= 0 && $audioDts <= $lastVideoDts) {
+                    $audioInRange[] = $sample;
+                } else {
+                    $audioOutOfRange[] = $sample;
+                }
+            }
+
+            // 处理在视频范围内的音频
+            if (!empty($audioInRange)) {
+                $audioTrack['samples'] = $audioInRange;
+                $this->_remuxAudio($audioTrack);
+            }
+
+            // 处理视频
+            $this->_remuxVideo($videoTrack);
+
+            // 处理不在视频范围内的音频
+            if (!empty($audioOutOfRange)) {
+                $audioTrack['samples'] = $audioOutOfRange;
+                $this->_remuxAudio($audioTrack);
+            }
+        } else {
+            // 只有一个轨道，直接处理
+            if ($hasVideo) {
+                $this->_remuxVideo($videoTrack);
+            }
+            if ($hasAudio) {
+                $this->_remuxAudio($audioTrack);
+            }
+        }
     }
 
     public function _onTrackMetadataReceived($type, $metadata)
@@ -102,11 +150,9 @@ class MP4Remuxer
         if ($type === 'audio') {
             $this->_audioMeta = $metadata;
             $metabox = MP4::generateInitSegment($metadata);
-            error_log("msg+audio: " . print_r($metadata, true));
         } elseif ($type === 'video') {
             $this->_videoMeta = $metadata;
             $metabox = MP4::generateInitSegment($metadata);
-            error_log("msg+video: " . print_r($metadata, true));
         } else {
             return;
         }
@@ -124,41 +170,49 @@ class MP4Remuxer
     public function _calculateDtsBase($audioTrack, $videoTrack)
     {
         if ($this->_dtsBaseInited) return;
+
+        // 分别记录音频和视频的第一个DTS
         if (!empty($audioTrack['samples']) && count($audioTrack['samples'])) {
             $this->_audioDtsBase = $audioTrack['samples'][0]['dts'];
         }
         if (!empty($videoTrack['samples']) && count($videoTrack['samples'])) {
             $this->_videoDtsBase = $videoTrack['samples'][0]['dts'];
         }
-        // 确保dtsBase是所有轨道DTS的最小值
-        $this->_dtsBase = min($this->_audioDtsBase, $this->_videoDtsBase);
+
+        $minAudio = ($this->_audioDtsBase === INF) ? PHP_INT_MAX : $this->_audioDtsBase;
+        $minVideo = ($this->_videoDtsBase === INF) ? PHP_INT_MAX : $this->_videoDtsBase;
+        $this->_dtsBase = min($minAudio, $minVideo);
+
+        error_log("MP4Remuxer: Audio DTS Base = {$this->_audioDtsBase}, Video DTS Base = {$this->_videoDtsBase}, Common Base = {$this->_dtsBase}");
+
         $this->_dtsBaseInited = true;
     }
 
     public function _remuxAudio(&$audioTrack)
     {
         if ($this->_audioMeta === null) return;
+
         $samples = &$audioTrack['samples'];
         if (empty($samples)) return;
+
         $dtsCorrection = null;
         $firstDts = -1;
         $lastDts = -1;
-        $remuxSilentFrame = false;
-        $silentFrameDuration = -1;
         $refSampleDuration = $this->_audioMeta['refSampleDuration'];
         $mdatChunks = [];
         $mp4Samples = [];
+
         while (count($samples)) {
             $aacSample = array_shift($samples);
             $unit = $aacSample['unit'];
-            $originalDts = $aacSample['dts'] - $this->_dtsBase;
+
+            // 关键修复：使用音频自己的DTS基准
+            $originalDts = $aacSample['dts'] - $this->_audioDtsBase;
+
             if ($dtsCorrection === null) {
                 if ($this->_audioNextDts === null) {
                     if ($this->_audioSegmentInfoList->isEmpty()) {
                         $dtsCorrection = 0;
-                        if ($this->_fillSilentAfterSeek && !$this->_videoSegmentInfoList->isEmpty()) {
-                            $remuxSilentFrame = true;
-                        }
                     } else {
                         $lastSample = $this->_audioSegmentInfoList->getLastSampleBefore($originalDts);
                         if ($lastSample != null) {
@@ -171,7 +225,6 @@ class MP4Remuxer
                         }
                     }
                 } else {
-                    // 确保当前样本的DTS大于前一个segment的最后DTS
                     if ($originalDts <= $this->_audioNextDts) {
                         $dtsCorrection = $originalDts - ($this->_audioNextDts + 1);
                     } else {
@@ -179,37 +232,23 @@ class MP4Remuxer
                     }
                 }
             }
+
             $dts = $originalDts - $dtsCorrection;
-            // 确保DTS单调递增（同一segment内部）
+
+            // 确保DTS单调递增
             if (!empty($mp4Samples)) {
                 $prevSample = $mp4Samples[count($mp4Samples)-1];
                 if ($dts <= $prevSample['dts']) {
                     $dts = $prevSample['dts'] + 1;
                 }
             }
-            if ($remuxSilentFrame) {
-                $videoSegment = $this->_videoSegmentInfoList->getLastSegmentBefore($originalDts);
-                if ($videoSegment != null && $videoSegment->beginDts < $dts) {
-                    $silentFrameDuration = $dts - $videoSegment->beginDts;
-                    $dts = $videoSegment->beginDts;
-                } else {
-                    $remuxSilentFrame = false;
-                }
-            }
+
             if ($firstDts === -1) $firstDts = $dts;
-            if ($remuxSilentFrame) {
-                $remuxSilentFrame = false;
-                array_unshift($samples, $aacSample);
-                $frame = $this->_generateSilentAudio($dts, $silentFrameDuration);
-                if ($frame !== null) {
-                    $mp4Samples[] = $frame['mp4Sample'];
-                    $mdatChunks[] = $frame['unit'];
-                }
-                continue;
-            }
+
+            // 计算采样持续时间
             $sampleDuration = 0;
             if (count($samples) >= 1) {
-                $nextDts = $samples[0]['dts'] - $this->_dtsBase - $dtsCorrection;
+                $nextDts = $samples[0]['dts'] - $this->_audioDtsBase - $dtsCorrection;
                 $sampleDuration = $nextDts - $dts;
                 if ($sampleDuration <= 0) {
                     $sampleDuration = $refSampleDuration;
@@ -224,6 +263,7 @@ class MP4Remuxer
                     $sampleDuration = $refSampleDuration;
                 }
             }
+
             $mp4Sample = [
                 'dts' => $dts,
                 'pts' => $dts,
@@ -233,19 +273,27 @@ class MP4Remuxer
                 'originalDts' => $originalDts,
                 'flags' => ['isLeading'=>0, 'dependsOn'=>1, 'isDependedOn'=>0, 'hasRedundancy'=>0, 'isNonSync'=>1]
             ];
+
             $mp4Samples[] = $mp4Sample;
             $mdatChunks[] = $unit;
         }
+
+        if (empty($mp4Samples)) return;
+
         $latest = $mp4Samples[count($mp4Samples)-1];
         $lastDts = $latest['dts'] + $latest['duration'];
-        // 确保下一个segment的起始DTS大于当前segment的结束DTS
+
         if ($this->_audioNextDts !== null && $lastDts <= $this->_audioNextDts) {
             $lastDts = $this->_audioNextDts + 1;
         }
         $this->_audioNextDts = $lastDts;
+
+        error_log("MP4Remuxer Audio: firstDts={$firstDts}, lastDts={$lastDts}, samples=" . count($mp4Samples));
+
         $mdatData = implode('', $mdatChunks);
         $mdatSize = 8 + strlen($mdatData);
         $mdat = pack('N', $mdatSize) . 'mdat' . $mdatData;
+
         $info = new MediaSegmentInfo();
         $info->beginDts = $firstDts;
         $info->endDts = $lastDts;
@@ -256,12 +304,14 @@ class MP4Remuxer
         $info->firstSample = new SampleInfo($mp4Samples[0]['dts'], $mp4Samples[0]['pts'], $mp4Samples[0]['duration'], $mp4Samples[0]['originalDts'], false);
         $info->lastSample = new SampleInfo($latest['dts'], $latest['pts'], $latest['duration'], $latest['originalDts'], false);
         if (!$this->_isLive) $this->_audioSegmentInfoList->append($info);
+
         $audioTrack['samples'] = $mp4Samples;
         $audioTrack['sequenceNumber'] += $audioTrack['addcoefficient'];
         $moof = MP4::moof($audioTrack, $firstDts);
         $audioTrack['samples'] = [];
         $audioTrack['length'] = 0;
         $merged = $moof . $mdat;
+
         call_user_func($this->_onMediaSegment, 'audio', [
             'type' => 'audio',
             'data' => $merged,
@@ -272,10 +322,8 @@ class MP4Remuxer
 
     public function _generateSilentAudio($dts, $frameDuration)
     {
-        error_log($this->TAG . " GenerateSilentAudio: dts = {$dts}, duration = {$frameDuration}");
         $unit = AAC::getSilentFrame($this->_audioMeta['channelCount']);
         if ($unit === null) {
-            error_log($this->TAG . " Cannot generate silent aac frame for channelCount = {$this->_audioMeta['channelCount']}");
             return null;
         }
         $mp4Sample = [
@@ -294,6 +342,7 @@ class MP4Remuxer
     {
         $samples = &$videoTrack['samples'];
         if (empty($samples)) return;
+
         $dtsCorrection = null;
         $firstDts = -1;
         $lastDts = -1;
@@ -302,10 +351,14 @@ class MP4Remuxer
         $mdatChunks = [];
         $mp4Samples = [];
         $info = new MediaSegmentInfo();
+
         while (count($samples)) {
             $avcSample = array_shift($samples);
             $keyframe = $avcSample['isKeyframe'];
-            $originalDts = $avcSample['dts'] - $this->_dtsBase;
+
+            // 关键修复：使用视频自己的DTS基准
+            $originalDts = $avcSample['dts'] - $this->_videoDtsBase;
+
             if ($dtsCorrection === null) {
                 if ($this->_videoNextDts === null) {
                     if ($this->_videoSegmentInfoList->isEmpty()) {
@@ -325,15 +378,17 @@ class MP4Remuxer
                     $dtsCorrection = $originalDts - $this->_videoNextDts;
                 }
             }
+
             $dts = $originalDts - $dtsCorrection;
             $cts = $avcSample['cts'];
             $pts = $dts + $cts;
+
             if ($firstDts === -1) {
                 $firstDts = $dts;
                 $firstPts = $pts;
             }
+
             $sampleSize = 0;
-            // 如果是关键帧，在前面添加SPS和PPS
             if ($keyframe && !empty($this->_videoMeta['sps']) && !empty($this->_videoMeta['pps'])) {
                 $mdatChunks[] = "\x00\x00\x00\x01" . $this->_videoMeta['sps'];
                 $mdatChunks[] = "\x00\x00\x00\x01" . $this->_videoMeta['pps'];
@@ -341,13 +396,13 @@ class MP4Remuxer
             }
             foreach ($avcSample['units'] as $unit) {
                 $data = $unit['data'];
-                // 在MP4中，每个NALU前面需要添加起始码
                 $mdatChunks[] = "\x00\x00\x00\x01" . $data;
                 $sampleSize += 4 + strlen($data);
             }
+
             $sampleDuration = 0;
             if (count($samples) >= 1) {
-                $nextDts = $samples[0]['dts'] - $this->_dtsBase - $dtsCorrection;
+                $nextDts = $samples[0]['dts'] - $this->_videoDtsBase - $dtsCorrection;
                 $sampleDuration = $nextDts - $dts;
             } else {
                 if (count($mp4Samples) >= 1) {
@@ -356,11 +411,13 @@ class MP4Remuxer
                     $sampleDuration = $this->_videoMeta['refSampleDuration'];
                 }
             }
+
             if ($keyframe) {
                 $syncPoint = new SampleInfo($dts, $pts, $sampleDuration, $avcSample['dts'], true);
                 if (isset($avcSample['fileposition'])) $syncPoint->fileposition = $avcSample['fileposition'];
                 $info->appendSyncPoint($syncPoint);
             }
+
             $mp4Sample = [
                 'dts' => $dts,
                 'pts' => $pts,
@@ -379,13 +436,20 @@ class MP4Remuxer
             ];
             $mp4Samples[] = $mp4Sample;
         }
+
+        if (empty($mp4Samples)) return;
+
         $latest = $mp4Samples[count($mp4Samples)-1];
         $lastDts = $latest['dts'] + $latest['duration'];
         $lastPts = $latest['pts'] + $latest['duration'];
         $this->_videoNextDts = $lastDts;
+
+        error_log("MP4Remuxer Video: firstDts={$firstDts}, lastDts={$lastDts}, samples=" . count($mp4Samples));
+
         $mdatData = implode('', $mdatChunks);
         $mdatSize = 8 + strlen($mdatData);
         $mdat = pack('N', $mdatSize) . 'mdat' . $mdatData;
+
         $info->beginDts = $firstDts;
         $info->endDts = $lastDts;
         $info->beginPts = $firstPts;
@@ -395,6 +459,7 @@ class MP4Remuxer
         $info->firstSample = new SampleInfo($mp4Samples[0]['dts'], $mp4Samples[0]['pts'], $mp4Samples[0]['duration'], $mp4Samples[0]['originalDts'], $mp4Samples[0]['isKeyframe']);
         $info->lastSample = new SampleInfo($latest['dts'], $latest['pts'], $latest['duration'], $latest['originalDts'], $latest['isKeyframe']);
         if (!$this->_isLive) $this->_videoSegmentInfoList->append($info);
+
         $videoTrack['samples'] = $mp4Samples;
         $videoTrack['sequenceNumber'] += $videoTrack['addcoefficient'];
         if ($this->_forceFirstIDR) {
@@ -406,6 +471,7 @@ class MP4Remuxer
         $videoTrack['samples'] = [];
         $videoTrack['length'] = 0;
         $merged = $moof . $mdat;
+
         call_user_func($this->_onMediaSegment, 'video', [
             'type' => 'video',
             'data' => $merged,
