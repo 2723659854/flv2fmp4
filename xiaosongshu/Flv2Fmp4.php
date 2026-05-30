@@ -105,8 +105,10 @@ class Flv2Fmp4
         return $offset;
     }
 
+    // 修改 Flv2Fmp4.php 中的 onMdiaSegment 方法
     public function onMdiaSegment($track, $value)
     {
+        // 直接输出，不要缓存
         if ($this->onMediaSegment) {
             call_user_func($this->onMediaSegment, $value['data']);
         }

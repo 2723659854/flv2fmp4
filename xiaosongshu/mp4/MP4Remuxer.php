@@ -99,47 +99,64 @@ class MP4Remuxer
         $hasVideo = !empty($videoTrack['samples']) && count($videoTrack['samples']) > 0;
         $hasAudio = !empty($audioTrack['samples']) && count($audioTrack['samples']) > 0;
 
-        // 交错处理音频和视频，确保它们在同一个时间窗口内
-        if ($hasVideo && $hasAudio) {
-            // 找到最小的视频DTS和最大的音频DTS
-            $firstVideoDts = $videoTrack['samples'][0]['dts'] - $this->_videoDtsBase;
-            $lastVideoDts = $videoTrack['samples'][count($videoTrack['samples'])-1]['dts'] - $this->_videoDtsBase;
-            $firstAudioDts = $audioTrack['samples'][0]['dts'] - $this->_audioDtsBase;
-            $lastAudioDts = $audioTrack['samples'][count($audioTrack['samples'])-1]['dts'] - $this->_audioDtsBase;
+        // 交替处理音频和视频，确保时间戳交错
+        $audioSamples = $hasAudio ? $audioTrack['samples'] : [];
+        $videoSamples = $hasVideo ? $videoTrack['samples'] : [];
 
-            // 分离音频样本：在视频时间范围内的和不在范围内的
-            $audioInRange = [];
-            $audioOutOfRange = [];
+        $audioChunks = [];
+        $videoChunks = [];
 
-            foreach ($audioTrack['samples'] as $sample) {
-                $audioDts = $sample['dts'] - $this->_audioDtsBase;
-                if ($audioDts >= 0 && $audioDts <= $lastVideoDts) {
-                    $audioInRange[] = $sample;
-                } else {
-                    $audioOutOfRange[] = $sample;
+        // 将音频样本分成小块（每100ms一块）
+        if ($hasAudio) {
+            $chunk = [];
+            $chunkStartDts = null;
+            foreach ($audioSamples as $sample) {
+                $dts = $sample['dts'] - $this->_audioDtsBase;
+                if ($chunkStartDts === null) {
+                    $chunkStartDts = $dts;
+                }
+                $chunk[] = $sample;
+                if ($dts - $chunkStartDts >= 100) { // 100ms chunk
+                    $audioChunks[] = $chunk;
+                    $chunk = [];
+                    $chunkStartDts = null;
                 }
             }
-
-            // 处理在视频范围内的音频
-            if (!empty($audioInRange)) {
-                $audioTrack['samples'] = $audioInRange;
-                $this->_remuxAudio($audioTrack);
+            if (!empty($chunk)) {
+                $audioChunks[] = $chunk;
             }
+        }
 
-            // 处理视频
-            $this->_remuxVideo($videoTrack);
-
-            // 处理不在视频范围内的音频
-            if (!empty($audioOutOfRange)) {
-                $audioTrack['samples'] = $audioOutOfRange;
-                $this->_remuxAudio($audioTrack);
+        // 将视频样本分成小块（每100ms一块）
+        if ($hasVideo) {
+            $chunk = [];
+            $chunkStartDts = null;
+            foreach ($videoSamples as $sample) {
+                $dts = $sample['dts'] - $this->_videoDtsBase;
+                if ($chunkStartDts === null) {
+                    $chunkStartDts = $dts;
+                }
+                $chunk[] = $sample;
+                if ($dts - $chunkStartDts >= 100) { // 100ms chunk
+                    $videoChunks[] = $chunk;
+                    $chunk = [];
+                    $chunkStartDts = null;
+                }
             }
-        } else {
-            // 只有一个轨道，直接处理
-            if ($hasVideo) {
+            if (!empty($chunk)) {
+                $videoChunks[] = $chunk;
+            }
+        }
+
+        // 交错处理音频和视频chunks
+        $maxChunks = max(count($audioChunks), count($videoChunks));
+        for ($i = 0; $i < $maxChunks; $i++) {
+            if ($i < count($videoChunks)) {
+                $videoTrack['samples'] = $videoChunks[$i];
                 $this->_remuxVideo($videoTrack);
             }
-            if ($hasAudio) {
+            if ($i < count($audioChunks)) {
+                $audioTrack['samples'] = $audioChunks[$i];
                 $this->_remuxAudio($audioTrack);
             }
         }
